@@ -97,12 +97,12 @@ public partial class Monad<TInput, TReturn>
         var maybeRightValue = ReflectionHelpers.GetRightFromDynamicEither(outParam);
         maybeRightValue.Iter(rightValue =>
         {
-            rightValue.AssertLoaded();
+            FunctionalExtensions.AssertLoaded(rightValue);
             ShortCircuitValue = (TReturn)rightValue;
             ShortCircuitValueSet = true;
         });
 
-        result.AssertLoaded();
+        FunctionalExtensions.AssertLoaded(result);
         return (Monad<TInput, TReturn>)result;
     }
 }
