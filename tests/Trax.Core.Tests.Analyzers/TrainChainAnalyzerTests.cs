@@ -1,3 +1,4 @@
+using FluentAssertions;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp.Testing;
 using Microsoft.CodeAnalysis.Testing;
@@ -9,6 +10,8 @@ namespace Trax.Core.Tests.Analyzers;
 /// <summary>
 /// Tests for the TrainChainAnalyzer covering Phase 1 (basic chain validation)
 /// and Phase 2 (tuple decomposition, interface resolution).
+///
+/// <para>Enforces <c>docs/adr/0001-chain-composition-errors-are-compile-time.md</c>.</para>
 /// </summary>
 [TestFixture]
 public class TrainChainAnalyzerTests
@@ -56,6 +59,41 @@ namespace Trax.Core.Monad
     }
 }
 ";
+
+    /// <summary>
+    /// The analyzer's advertised surface: two diagnostics, both errors.
+    ///
+    /// <para>
+    /// The individual chain tests assert a given source produces a given diagnostic, so they
+    /// would catch a severity downgrade on a rule they already cover. Nothing covered the set
+    /// itself: a third diagnostic added quietly, or an id renamed, changes what consumers see
+    /// in their build and fails none of them.
+    /// </para>
+    /// </summary>
+    [Test]
+    public void Analyzer_Advertises_TwoChainDiagnostics_BothErrors()
+    {
+        var supported = new TrainChainAnalyzer().SupportedDiagnostics;
+
+        supported
+            .Select(d => d.Id)
+            .Should()
+            .BeEquivalentTo(
+                ["CHAIN001", "CHAIN002"],
+                "the analyzer's diagnostic ids are part of the package's contract: consumers "
+                    + "suppress and configure by id. See "
+                    + "docs/adr/0001-chain-composition-errors-are-compile-time.md."
+            );
+
+        supported
+            .Should()
+            .OnlyContain(
+                d => d.DefaultSeverity == DiagnosticSeverity.Error,
+                "a chain whose input is not in memory cannot run, so there is nothing to "
+                    + "continue to. A warning would only move the failure back to run time. See "
+                    + "docs/adr/0001-chain-composition-errors-are-compile-time.md."
+            );
+    }
 
     private static CSharpAnalyzerTest<TrainChainAnalyzer, DefaultVerifier> CreateTest(
         string testSource,
