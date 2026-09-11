@@ -19,7 +19,7 @@ if your work contradicts one, say so rather than silently overriding it.
 | the analyzer, or a new diagnostic | [0001](./docs/adr/0001-chain-composition-errors-are-compile-time.md), the ids are a published contract and the severity is deliberate |
 
 Decisions binding more than one repo live in the central corpus at `Trax.Docs/adr/`, whose
-index lists them by repo. Seven name `core`: executable guards, exact version pinning, the
+index lists them by repo. Eight name `core`: executable guards, exact version pinning, the
 dependency direction, the three test conventions (FluentAssertions, no `[Ignore]`, no fixed
 delays), and the documentation lints. In a workspace checkout the index is at
 `../Trax.Docs/adr/README.md`; that path does not resolve on GitHub, because it crosses a
