@@ -66,8 +66,4 @@ opt-in error source on for every consumer at once.
 
 ## Changelog
 
-- **2026-09-11**: Corrected the mechanism: the analyzer triggers on Resolve() and walks the
-  chain back, rather than reading constructor Chain() calls.
-- **2026-09-11**: Corrected the packaging claim. The analyzer is a separate opt-in package;
-  referencing Trax.Core does not bring it in, and the published setup page said it did.
 - **2026-09-11**: Recorded.
