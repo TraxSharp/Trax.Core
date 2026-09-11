@@ -7,9 +7,10 @@ status: accepted
 # A mis-composed chain does not compile
 
 `Trax.Core` ships a Roslyn analyzer inside the NuGet package, at `analyzers/dotnet/cs`.
-It reads the `.Chain<T>()` calls in a train's constructor, tracks what each junction puts
-into memory, and raises an **error** when a junction asks for a type nothing has produced
-(`CHAIN001`) or when the train's return type is never produced (`CHAIN002`).
+It triggers on a `Resolve()` call, walks back through the fluent chain that produced it,
+simulates what each junction puts into memory, and raises an **error** when a junction asks
+for a type nothing has produced (`CHAIN001`) or when the train's return type is never
+produced (`CHAIN002`).
 
 Both are `DiagnosticSeverity.Error`, not warnings. The build stops.
 
@@ -40,9 +41,11 @@ the failure back to run time, which is the option already rejected.
 positive is a broken build for someone else, which is why the analyzer only reports when it
 can see the whole chain and stays silent when it cannot.
 
-**It only sees what it can read syntactically.** A chain assembled dynamically, or across a
-method boundary, is invisible to it. Those cases fall back to the runtime behaviour the
-analyzer exists to avoid, and nothing warns.
+**It only sees what it can read syntactically**, and it bails out rather than guessing. The
+chain must terminate in `Resolve()` and start with `Activate()`, and any symbol it cannot
+resolve stops the analysis silently. A chain assembled dynamically, or across a method
+boundary, is invisible to it, and those cases fall back to the runtime behaviour the
+analyzer exists to avoid.
 
 ## Exemplars
 
@@ -56,4 +59,6 @@ every consumer's build would go quiet rather than red.
 
 ## Changelog
 
+- **2026-09-11**: Corrected the mechanism: the analyzer triggers on Resolve() and walks the
+  chain back, rather than reading constructor Chain() calls.
 - **2026-09-11**: Recorded.

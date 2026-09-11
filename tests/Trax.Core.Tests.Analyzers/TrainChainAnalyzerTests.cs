@@ -64,10 +64,10 @@ namespace Trax.Core.Monad
     /// The analyzer's advertised surface: two diagnostics, both errors.
     ///
     /// <para>
-    /// The individual chain tests assert a given source produces a given diagnostic, so they
-    /// would catch a severity downgrade on a rule they already cover. Nothing covered the set
-    /// itself: a third diagnostic added quietly, or an id renamed, changes what consumers see
-    /// in their build and fails none of them.
+    /// The individual chain tests expect a specific id at a specific severity, so a rename or a
+    /// downgrade on a rule they already cover fails them. What nothing covered is the set
+    /// itself: a third diagnostic added quietly appears in every consumer's build and fails
+    /// none of them.
     /// </para>
     /// </summary>
     [Test]
