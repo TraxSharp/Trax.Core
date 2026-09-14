@@ -2,8 +2,9 @@
 
 The foundation: trains, junctions, railway error propagation, the memory dictionary, the
 Roslyn analyzer, and the `Trax.Core.Testing` guard engines. It depends on nothing in the
-workspace and everything in the workspace depends on it, so a change here reaches every
-other Trax repo and every consumer.
+workspace, and the other seven code repos all depend on it, directly or through
+`Trax.Effect`, so a change here reaches every one of them and every consumer. Trax.Docs and
+Trax.Website hold no .NET reference to it.
 
 This file is the entry point. It routes; it does not restate the rules.
 
@@ -21,9 +22,9 @@ if your work contradicts one, say so rather than silently overriding it.
 Decisions binding more than one repo live in the central corpus at `Trax.Docs/adr/`, whose
 index lists them by repo. Eight name `core`: executable guards, exact version pinning, the
 dependency direction, the three test conventions (FluentAssertions, no `[Ignore]`, no fixed
-delays), and the documentation lints. In a workspace checkout the index is at
-`../Trax.Docs/adr/README.md`; that path does not resolve on GitHub, because it crosses a
-repository boundary.
+delays), the documentation lints, and the public API baseline. In a workspace checkout the
+index is at `../Trax.Docs/adr/README.md`; that path does not resolve on GitHub, because it
+crosses a repository boundary.
 
 ## When your change makes a decision
 

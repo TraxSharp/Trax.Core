@@ -33,7 +33,7 @@ public class DirectoryBuildPropsVersionTests
                 "Directory.Build.props <Version> is locked at 1.99.99 for local development. "
                     + "CI overrides this via -p:Version=<semver> from semantic-release. "
                     + "Changing it breaks the nuget.config local-feed wins-over-nuget.org guarantee "
-                    + "and can ship a malformed version. See CLAUDE.md > Versioning Strategy."
+                    + "and can ship a malformed version. See Trax.Docs/reference/semantic-release.md > How It Works."
             );
     }
 }

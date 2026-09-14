@@ -13,9 +13,12 @@ public class SourceTextTests
 
     /// <summary>
     /// The regression that motivated the single-pass rewrite. Stripping <c>//</c> before string
-    /// literals ate the rest of any line holding a URL, the dangling quote then swallowed
-    /// everything to the next quote in the file, and 148 of 928 test files went partly invisible
-    /// to the guards, hiding real violations.
+    /// literals ate the rest of any line holding a URL, and the dangling quote then swallowed
+    /// everything to the next quote in the file. Across the 928 test files in the eight code
+    /// repos, that lost code in 93 of them, up to 94% of a single file, and two of those losses
+    /// were hiding a real guard-pattern violation. A second defect, block comments and multi-line
+    /// verbatim strings collapsing to one token, dropped newlines in 148 files, 92 of them the
+    /// same ones, so every line number reported after one of those was wrong.
     /// </summary>
     [Test]
     public void Strip_UrlInsideAString_DoesNotSwallowTheRestOfTheFile()

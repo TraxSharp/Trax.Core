@@ -32,7 +32,9 @@ and a train nobody registered is never checked at all.
 
 **Warning instead of error.** Rejected because there is no legitimate way to continue. A
 junction whose input is not in memory cannot run; allowing the build to proceed only moves
-the failure back to run time, which is the option already rejected.
+the failure back to run time, which is the option already rejected. A false positive is the
+one case where continuing is legitimate, and a pragma settles that at the call site without
+making every true positive advisory.
 
 ## Consequences
 
@@ -44,14 +46,31 @@ repository. Inside this solution it is propagated to every project by `Directory
 as a `ProjectReference` with `OutputItemType="Analyzer"`, which is why it looks automatic
 from in here and is not.
 
-**A false positive costs a consumer their build**, which is why the analyzer reports only
-when it can see the whole chain and stays silent when it cannot.
+**A false positive costs a consumer their build**, and the analyzer cannot rule one out. It
+abandons a chain only when it cannot parse it at all: the receiver is not a `Monad<,>`, the
+fluent chain does not parse, or it does not start with `Activate()`. Anything else it cannot
+resolve is skipped one step at a time, and a skipped step is the case that bites: its `TOut`
+never enters the simulated memory, so a later junction or the `Resolve()` check reports
+CHAIN001 or CHAIN002 against memory the running chain would have filled.
 
-**It only sees what it can read syntactically**, and it bails out rather than guessing. The
-chain must terminate in `Resolve()` and start with `Activate()`, and any symbol it cannot
-resolve stops the analysis silently. A chain assembled dynamically, or across a method
-boundary, is invisible to it, and those cases fall back to the runtime behaviour the
-analyzer exists to avoid.
+The skip that matters is a junction named by a type parameter rather than a concrete type.
+`GetSingleTypeArgument` takes the first type argument only when it is an `INamedTypeSymbol`,
+and a generic method's own parameter is an `ITypeParameterSymbol`, so a helper along the lines
+of `Run<TJunction>()` that chains its `TJunction` is skipped while the runtime resolves it
+normally. A chaining method the walk does not recognise drops out the same way, as does an
+input satisfied through a sibling interface, which `memory.Contains` misses. What is *not* a
+false positive is a junction with no `IJunction<TIn, TOut>` at all: `Chain<TJunction>()` is
+constrained to `class`, so it compiles, but `ExtractJunctionTypeArguments` then throws at run
+time for the same reason the analyzer could not resolve it. The escape hatch is
+`#pragma warning disable CHAIN001` at the call site, or `<NoWarn>` for a project built on a
+pattern the analyzer cannot follow, and [Analyzer](/docs/core/analyzer) documents both. That
+cost is what the opt-in packaging buys back: a consumer unwilling to reason about the
+analyzer's blind spots does not reference it, and nothing changes for them.
+
+**It only sees what it can read syntactically**, and it does not guess. The chain must
+terminate in `Resolve()` and start with `Activate()`. A chain assembled dynamically, or
+across a method boundary, is invisible to it, and those cases fall back to the runtime
+behaviour the analyzer exists to avoid.
 
 ## Exemplars
 
@@ -62,8 +81,13 @@ analyzer exists to avoid.
 Not covered: nothing asserts the analyzer is packed into the NuGet output at the right path,
 or that `Trax.Core` continues **not** to depend on it. A packaging regression in either
 direction is silent: one ships a package whose analyzer never loads, the other turns an
-opt-in error source on for every consumer at once.
+opt-in error source on for every consumer at once. Nothing drives a chain through a junction
+the analyzer cannot resolve either, so the skip path above and the false positives that
+follow from it go unasserted.
 
 ## Changelog
 
+- **2026-09-11**: Corrected the claim that the analyzer stays silent whenever it cannot see
+  the whole chain. An unresolvable junction is skipped and the walk continues, so false
+  positives are possible and are suppressed with a pragma.
 - **2026-09-11**: Recorded.
