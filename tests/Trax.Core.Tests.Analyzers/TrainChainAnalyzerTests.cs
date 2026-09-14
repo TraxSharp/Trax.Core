@@ -13,6 +13,7 @@ namespace Trax.Core.Tests.Analyzers;
 ///
 /// <para>Enforces <c>docs/adr/0001-chain-composition-errors-are-compile-time.md</c>.</para>
 /// </summary>
+[Property("adr", "docs/adr/0001-chain-composition-errors-are-compile-time.md")]
 [TestFixture]
 public class TrainChainAnalyzerTests
 {
