@@ -70,6 +70,32 @@ public class ChainVerificationTests : TestSetup
             .Should()
             .BeEmpty("a value in Memory is reachable by every interface it implements");
 
+    [Test]
+    public void Verify_AJunctionTakingATuple_IsSatisfiedByItsElements() =>
+        ChainVerification
+            .Verify(new TupleConsumingTrain().DeclaredChain(), typeof(string), typeof(bool))
+            .Should()
+            .BeEmpty(
+                "a tuple input is assembled from its elements rather than looked up whole, so "
+                    + "each element being present is what satisfies it"
+            );
+
+    [Test]
+    public void Verify_AJunctionTakingAnInjectedService_IsSatisfiedByTheContainer()
+    {
+        var chain = new ServiceConsumingTrain().DeclaredChain();
+
+        ChainVerification
+            .Verify(chain, typeof(string), typeof(bool))
+            .Should()
+            .ContainSingle("without the container, an injected input looks like a missing one");
+
+        ChainVerification
+            .Verify(chain, typeof(string), typeof(bool), type => type == typeof(IAmbient))
+            .Should()
+            .BeEmpty("a junction input not in Memory falls back to the container");
+    }
+
     private interface IIngredient;
 
     private record Ingredient : IIngredient;
@@ -99,6 +125,31 @@ public class ChainVerificationTests : TestSetup
     private class IngredientToBool : Junction<IIngredient, bool>
     {
         public override Task<bool> Run(IIngredient input) => Task.FromResult(true);
+    }
+
+    private interface IAmbient;
+
+    private class PairToFlag : Junction<(int Length, bool Empty), bool>
+    {
+        public override Task<bool> Run((int Length, bool Empty) input) =>
+            Task.FromResult(!input.Empty);
+    }
+
+    private class AmbientToFlag : Junction<IAmbient, bool>
+    {
+        public override Task<bool> Run(IAmbient input) => Task.FromResult(true);
+    }
+
+    private class TupleConsumingTrain : Train<string, bool>
+    {
+        protected override Task<Either<Exception, bool>> Junctions() =>
+            Chain<StringToPair>().Chain<PairToFlag>().Resolve();
+    }
+
+    private class ServiceConsumingTrain : Train<string, bool>
+    {
+        protected override Task<Either<Exception, bool>> Junctions() =>
+            Chain<AmbientToFlag>().Resolve();
     }
 
     private class WellFormedTrain : Train<string, bool>

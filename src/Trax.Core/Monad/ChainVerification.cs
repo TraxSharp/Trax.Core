@@ -39,7 +39,20 @@ public static class ChainVerification
     /// Replays <paramref name="chain"/> for a train taking <paramref name="input"/> and producing
     /// <paramref name="output"/>, returning everything that does not line up.
     /// </summary>
-    public static IReadOnlyList<ChainFault> Verify(ChainRecorder chain, Type input, Type output)
+    /// <param name="chain">The steps the train declares.</param>
+    /// <param name="input">The train's input type, which seeds Memory.</param>
+    /// <param name="output">The train's return type, which the chain must end holding.</param>
+    /// <param name="availableElsewhere">
+    /// Answers whether a type the chain never produces can still be supplied, because a junction
+    /// input not found in Memory falls back to the container. Without it, every junction taking
+    /// an injected service reads as a fault.
+    /// </param>
+    public static IReadOnlyList<ChainFault> Verify(
+        ChainRecorder chain,
+        Type input,
+        Type output,
+        Func<Type, bool>? availableElsewhere = null
+    )
     {
         var memory = new System.Collections.Generic.HashSet<Type> { typeof(Unit) };
         Remember(memory, input);
@@ -57,7 +70,7 @@ public static class ChainVerification
                 // reach its end without the return type ever entering Memory.
                 var shortCircuited = steps.Take(i).Any(s => s.Kind == ChainStepKind.ShortCircuit);
 
-                if (!shortCircuited && !memory.Contains(output))
+                if (!shortCircuited && !Satisfied(memory, output, availableElsewhere))
                     faults.Add(
                         new ChainFault(
                             i,
@@ -71,7 +84,7 @@ public static class ChainVerification
                 continue;
             }
 
-            if (step.In is { } required && !memory.Contains(required))
+            if (step.In is { } required && !Satisfied(memory, required, availableElsewhere))
                 faults.Add(
                     new ChainFault(
                         i,
@@ -87,6 +100,28 @@ public static class ChainVerification
         }
 
         return faults;
+    }
+
+    /// <summary>
+    /// Whether a junction can be handed something of this type.
+    /// </summary>
+    /// <remarks>
+    /// Mirrors the three ways the runtime finds one: a tuple is assembled from its elements
+    /// rather than looked up whole, anything else is taken from Memory, and failing that the
+    /// container is asked.
+    /// </remarks>
+    private static bool Satisfied(
+        System.Collections.Generic.HashSet<Type> memory,
+        Type required,
+        Func<Type, bool>? availableElsewhere
+    )
+    {
+        if (required.IsTuple())
+            return required
+                .GetGenericArguments()
+                .All(element => Satisfied(memory, element, availableElsewhere));
+
+        return memory.Contains(required) || (availableElsewhere?.Invoke(required) ?? false);
     }
 
     /// <summary>
