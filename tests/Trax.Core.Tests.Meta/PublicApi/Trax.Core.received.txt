@@ -223,6 +223,7 @@ namespace Trax.Core.Train
             where TJunction :  class { }
         protected virtual System.Threading.Tasks.Task<LanguageExt.Either<System.Exception, TReturn>> Junctions() { }
         protected virtual Trax.Core.Monad.Monad<TInput, TReturn> NewMonad() { }
+        protected LanguageExt.Either<System.Exception, TReturn> Resolve() { }
         public virtual System.Threading.Tasks.Task<TReturn> Run(TInput input, System.Threading.CancellationToken cancellationToken = default) { }
         public System.Threading.Tasks.Task<LanguageExt.Either<System.Exception, TReturn>> RunEither(TInput input) { }
         protected virtual System.Threading.Tasks.Task<LanguageExt.Either<System.Exception, TReturn>> RunInternal(TInput input) { }

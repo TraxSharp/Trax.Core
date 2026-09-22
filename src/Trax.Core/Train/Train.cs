@@ -202,6 +202,18 @@ public abstract class Train<TInput, TReturn> : IRoute<TInput, TReturn>
         where TJunction : IJunction<TIn, Unit>, new() => _monad!.Chain<TJunction, TIn>();
 
     /// <summary>
+    /// Ends a chain that declares no junctions, taking the train's return value from Memory.
+    /// </summary>
+    /// <remarks>
+    /// A train whose return type is already in Memory, because it is the input type or the
+    /// seeded <c>Unit</c>, declares a chain of zero junctions. This is the terminal step for
+    /// that chain. It takes no value and computes nothing: a declaration states which junctions
+    /// run, and stating a result directly would make the chain depend on something other than
+    /// the junctions it names.
+    /// </remarks>
+    protected Either<Exception, TReturn> Resolve() => _monad!.Resolve();
+
+    /// <summary>
     /// Extracts a value of type TOut from an object of type TIn in Memory.
     /// </summary>
     protected Monad<TInput, TReturn> Extract<TIn, TOut>() => _monad!.Extract<TIn, TOut>();

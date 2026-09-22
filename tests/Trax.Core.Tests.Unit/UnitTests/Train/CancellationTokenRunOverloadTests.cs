@@ -110,10 +110,10 @@ public class CancellationTokenRunOverloadTests : TestSetup
     {
         public CancellationToken TokenDuringExecution { get; private set; }
 
-        protected override Task<Either<Exception, string>> RunInternal(string input)
+        protected override Task<Either<Exception, string>> Junctions()
         {
             TokenDuringExecution = CancellationToken;
-            return Task.FromResult<Either<Exception, string>>(input);
+            return Task.FromResult(Resolve());
         }
     }
 

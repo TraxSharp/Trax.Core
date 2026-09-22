@@ -204,10 +204,10 @@ public class CancellationTokenTests : TestSetup
     {
         public CancellationToken CapturedToken { get; private set; }
 
-        protected override Task<Either<Exception, string>> RunInternal(string input)
+        protected override Task<Either<Exception, string>> Junctions()
         {
             CapturedToken = CancellationToken;
-            return Task.FromResult<Either<Exception, string>>(input);
+            return Task.FromResult(Resolve());
         }
     }
 
