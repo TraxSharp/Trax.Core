@@ -525,11 +525,9 @@ public class TrainTests : TestSetup
 
     private class MemoryInterfaceTest : Train<IFirstInheritedInterface, Unit>
     {
-        protected override Task<Either<Exception, Unit>> RunInternal(
-            IFirstInheritedInterface input
-        ) => Activate(input)
+        protected override Task<Either<Exception, Unit>> Junctions() =>
 #pragma warning disable CHAIN001 // Analyzer sees TInput as IFirstInheritedInterface; runtime concrete type also implements ISecondInheritedInterface
-            .Chain<TestMemoryJunction>()
+            Chain<TestMemoryJunction>()
 #pragma warning restore CHAIN001
             .Resolve();
     }
@@ -635,13 +633,8 @@ public class TrainTests : TestSetup
 
     private class TrainTestWithTupleInput : Train<(int, string, object), (bool, double, object)>
     {
-        protected override Task<Either<Exception, (bool, double, object)>> RunInternal(
-            (int, string, object) input
-        ) =>
-            Activate(input)
-                .Chain<TupleReturnJunction>()
-                .ShortCircuit<TupleReturnJunction>()
-                .Resolve();
+        protected override Task<Either<Exception, (bool, double, object)>> Junctions() =>
+            Chain<TupleReturnJunction>().ShortCircuit<TupleReturnJunction>().Resolve();
     }
 
     private class ChainTestWithUnitInput : Train<Ingredients, List<GlassBottle>>
@@ -715,7 +708,7 @@ public class TrainTests : TestSetup
 
     private class ChainTestWithServiceProvider(IServiceProvider serviceProvider) : Train<Unit, Unit>
     {
-        protected override Task<Either<Exception, Unit>> RunInternal(Unit input) =>
-            Activate(input, serviceProvider).Chain<LoggerTest>().Resolve();
+        protected override Task<Either<Exception, Unit>> Junctions() =>
+            AddServices(serviceProvider).Chain<LoggerTest>().Resolve();
     }
 }

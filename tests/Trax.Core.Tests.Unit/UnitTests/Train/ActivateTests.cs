@@ -108,7 +108,7 @@ public class ActivateTests : TestSetup
 
     private class TestTupleTrain : Train<(int, object), string>
     {
-        protected override Task<Either<Exception, string>> RunInternal((int, object) input) =>
+        protected override Task<Either<Exception, string>> Junctions() =>
             throw new NotImplementedException();
     }
 }

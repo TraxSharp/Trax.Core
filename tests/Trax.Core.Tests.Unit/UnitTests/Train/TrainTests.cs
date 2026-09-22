@@ -34,9 +34,7 @@ public class TrainTests
 
     private class UnitTrain : Train<LanguageExt.Unit, LanguageExt.Unit>
     {
-        protected override async Task<Either<Exception, LanguageExt.Unit>> RunInternal(
-            LanguageExt.Unit input
-        ) => Activate(input).Resolve();
+        protected override async Task<Either<Exception, LanguageExt.Unit>> Junctions() => Resolve();
     }
 
     private class NotImplementedTrain : Train<LanguageExt.Unit, LanguageExt.Unit>

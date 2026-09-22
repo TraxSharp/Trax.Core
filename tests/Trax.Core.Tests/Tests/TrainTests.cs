@@ -150,13 +150,8 @@ public class TrainTests : TestSetup
 
     private class TrainTestWithTupleInput : Train<(int, string, object), (bool, double, object)>
     {
-        protected override Task<Either<Exception, (bool, double, object)>> RunInternal(
-            (int, string, object) input
-        ) =>
-            Activate(input)
-                .Chain<TupleReturnJunction>()
-                .ShortCircuit<TupleReturnJunction>()
-                .Resolve();
+        protected override Task<Either<Exception, (bool, double, object)>> Junctions() =>
+            Chain<TupleReturnJunction>().ShortCircuit<TupleReturnJunction>().Resolve();
     }
 
     private class ChainTestWithUnitInput : Train<Ingredients, List<GlassBottle>>
