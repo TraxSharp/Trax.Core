@@ -208,6 +208,14 @@ namespace Trax.Core.Train
             where TJunction :  class { }
         protected Trax.Core.Train.MonadTask<TInput, TReturn> Chain<TJunction>(TJunction instance)
             where TJunction :  class { }
+        protected Trax.Core.Train.MonadTask<TInput, TReturn> Chain<TJunction, TIn>()
+            where TJunction : Trax.Core.Junction.IJunction<TIn, LanguageExt.Unit>, new () { }
+        protected Trax.Core.Train.MonadTask<TInput, TReturn> Chain<TJunction, TIn>(TJunction junction)
+            where TJunction : Trax.Core.Junction.IJunction<TIn, LanguageExt.Unit> { }
+        protected Trax.Core.Train.MonadTask<TInput, TReturn> Chain<TJunction, TIn, TOut>()
+            where TJunction : Trax.Core.Junction.IJunction<TIn, TOut>, new () { }
+        protected Trax.Core.Train.MonadTask<TInput, TReturn> Chain<TJunction, TIn, TOut>(TJunction junction)
+            where TJunction : Trax.Core.Junction.IJunction<TIn, TOut> { }
         public Trax.Core.Monad.ChainRecorder DeclaredChain() { }
         protected Trax.Core.Monad.Monad<TInput, TReturn> Extract<TIn, TOut>() { }
         protected Trax.Core.Monad.Monad<TInput, TReturn> Extract<TIn, TOut>(TIn input) { }

@@ -160,28 +160,36 @@ public partial class Monad<TInput, TReturn>
     /// </summary>
     public MonadTask<TInput, TReturn> Chain<TJunction, TIn, TOut>(TJunction junction)
         where TJunction : IJunction<TIn, TOut> =>
-        new(ChainJunction<TJunction, TIn, TOut>(junction));
+        Recorder is not null
+            ? RecordStep<TJunction>(ChainStepKind.Chain, typeof(TIn), typeof(TOut))
+            : new(ChainJunction<TJunction, TIn, TOut>(junction));
 
     /// <summary>
     /// Creates and executes a junction with explicit input/output types.
     /// </summary>
     public MonadTask<TInput, TReturn> Chain<TJunction, TIn, TOut>()
         where TJunction : IJunction<TIn, TOut>, new() =>
-        new(ChainJunction<TJunction, TIn, TOut>(new TJunction()));
+        Recorder is not null
+            ? RecordStep<TJunction>(ChainStepKind.Chain, typeof(TIn), typeof(TOut))
+            : new(ChainJunction<TJunction, TIn, TOut>(new TJunction()));
 
     /// <summary>
     /// Executes a junction instance with explicit input type and Unit output.
     /// </summary>
     public MonadTask<TInput, TReturn> Chain<TJunction, TIn>(TJunction junction)
         where TJunction : IJunction<TIn, Unit> =>
-        new(ChainJunction<TJunction, TIn, Unit>(junction));
+        Recorder is not null
+            ? RecordStep<TJunction>(ChainStepKind.Chain, typeof(TIn), typeof(Unit))
+            : new(ChainJunction<TJunction, TIn, Unit>(junction));
 
     /// <summary>
     /// Creates and executes a junction with explicit input type and Unit output.
     /// </summary>
     public MonadTask<TInput, TReturn> Chain<TJunction, TIn>()
         where TJunction : IJunction<TIn, Unit>, new() =>
-        new(ChainJunction<TJunction, TIn, Unit>(new TJunction()));
+        Recorder is not null
+            ? RecordStep<TJunction>(ChainStepKind.Chain, typeof(TIn), typeof(Unit))
+            : new(ChainJunction<TJunction, TIn, Unit>(new TJunction()));
 
     #endregion
 
@@ -192,6 +200,21 @@ public partial class Monad<TInput, TReturn>
     private MonadTask<TInput, TReturn> RecordStep<TJunction>(ChainStepKind kind)
     {
         var (tIn, tOut) = ReflectionHelpers.ExtractJunctionTypeArguments<TJunction>();
+        Recorder!.Record(kind, typeof(TJunction), tIn, tOut);
+
+        return new MonadTask<TInput, TReturn>(Task.FromResult(this));
+    }
+
+    /// <summary>
+    /// Records a step whose input and output types the caller stated explicitly, rather than
+    /// ones inferred from the junction's interface.
+    /// </summary>
+    private MonadTask<TInput, TReturn> RecordStep<TJunction>(
+        ChainStepKind kind,
+        Type tIn,
+        Type tOut
+    )
+    {
         Recorder!.Record(kind, typeof(TJunction), tIn, tOut);
 
         return new MonadTask<TInput, TReturn>(Task.FromResult(this));

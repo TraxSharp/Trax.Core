@@ -3,6 +3,7 @@ using LanguageExt;
 using LanguageExt.UnsafeValueAccess;
 using Trax.Core.Exceptions;
 using Trax.Core.Extensions;
+using Trax.Core.Junction;
 using Trax.Core.Monad;
 using Trax.Core.Route;
 
@@ -180,6 +181,25 @@ public abstract class Train<TInput, TReturn> : IRoute<TInput, TReturn>
     /// </summary>
     protected MonadTask<TInput, TReturn> IChain<TJunction>()
         where TJunction : class => _monad!.IChain<TJunction>();
+
+    /// <summary>
+    /// Executes a junction instance whose input and output types are stated explicitly, for
+    /// chains where they cannot be inferred from the junction's interface.
+    /// </summary>
+    protected MonadTask<TInput, TReturn> Chain<TJunction, TIn, TOut>(TJunction junction)
+        where TJunction : IJunction<TIn, TOut> => _monad!.Chain<TJunction, TIn, TOut>(junction);
+
+    /// <inheritdoc cref="Chain{TJunction,TIn,TOut}(TJunction)"/>
+    protected MonadTask<TInput, TReturn> Chain<TJunction, TIn, TOut>()
+        where TJunction : IJunction<TIn, TOut>, new() => _monad!.Chain<TJunction, TIn, TOut>();
+
+    /// <inheritdoc cref="Chain{TJunction,TIn,TOut}(TJunction)"/>
+    protected MonadTask<TInput, TReturn> Chain<TJunction, TIn>(TJunction junction)
+        where TJunction : IJunction<TIn, Unit> => _monad!.Chain<TJunction, TIn>(junction);
+
+    /// <inheritdoc cref="Chain{TJunction,TIn,TOut}(TJunction)"/>
+    protected MonadTask<TInput, TReturn> Chain<TJunction, TIn>()
+        where TJunction : IJunction<TIn, Unit>, new() => _monad!.Chain<TJunction, TIn>();
 
     /// <summary>
     /// Extracts a value of type TOut from an object of type TIn in Memory.
