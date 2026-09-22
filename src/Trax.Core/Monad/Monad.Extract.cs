@@ -9,6 +9,12 @@ public partial class Monad<TInput, TReturn>
     /// </summary>
     public Monad<TInput, TReturn> Extract<TIn, TOut>()
     {
+        if (Recorder is not null)
+        {
+            Recorder.Record(ChainStepKind.Extract, null, typeof(TIn), typeof(TOut));
+            return this;
+        }
+
         // Try to get the source object from Memory
         var typeFromMemory = (TIn?)Memory.GetValueOrDefault(typeof(TIn));
 

@@ -51,7 +51,10 @@ public partial class Monad<TInput, TReturn>
     /// if the junction returns a value of type TReturn.
     /// </summary>
     public MonadTask<TInput, TReturn> ShortCircuit<TJunction>()
-        where TJunction : class => new(ShortCircuitAsync<TJunction>());
+        where TJunction : class =>
+        Recorder is not null
+            ? RecordStep<TJunction>(ChainStepKind.ShortCircuit)
+            : new(ShortCircuitAsync<TJunction>());
 
     private Task<Monad<TInput, TReturn>> ShortCircuitAsync<TJunction>()
         where TJunction : class
@@ -69,7 +72,10 @@ public partial class Monad<TInput, TReturn>
     /// if the junction returns a value of type TReturn.
     /// </summary>
     public MonadTask<TInput, TReturn> ShortCircuit<TJunction>(TJunction junctionInstance)
-        where TJunction : class => new(ShortCircuitAsync(junctionInstance));
+        where TJunction : class =>
+        Recorder is not null
+            ? RecordStep<TJunction>(ChainStepKind.ShortCircuit)
+            : new(ShortCircuitAsync(junctionInstance));
 
     private async Task<Monad<TInput, TReturn>> ShortCircuitAsync<TJunction>(
         TJunction junctionInstance

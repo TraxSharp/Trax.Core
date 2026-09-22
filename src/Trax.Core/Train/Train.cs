@@ -1,6 +1,7 @@
 using System.Text.Json.Serialization;
 using LanguageExt;
 using LanguageExt.UnsafeValueAccess;
+using Trax.Core.Exceptions;
 using Trax.Core.Extensions;
 using Trax.Core.Monad;
 using Trax.Core.Route;
@@ -77,7 +78,7 @@ public abstract class Train<TInput, TReturn> : IRoute<TInput, TReturn>
     /// <returns>Either the result of the train or an exception</returns>
     protected virtual async Task<Either<Exception, TReturn>> RunInternal(TInput input)
     {
-        _monad = new Monad<TInput, TReturn>(this, CancellationToken).Activate(input);
+        _monad = NewMonad().Activate(input);
 
         try
         {
@@ -87,6 +88,58 @@ public abstract class Train<TInput, TReturn> : IRoute<TInput, TReturn>
         {
             return ex;
         }
+    }
+
+    /// <summary>
+    /// Builds the monad this train chains through. Overridden where the monad needs more than
+    /// the train itself, such as a <c>ServiceTrain</c> supplying the container that resolves
+    /// junctions.
+    /// </summary>
+    protected virtual Monad<TInput, TReturn> NewMonad() => new(this, CancellationToken);
+
+    /// <summary>
+    /// True while this train's route is being read rather than run.
+    /// </summary>
+    /// <remarks>
+    /// Per-execution state is unavailable during route reading and accessors for it throw, so a
+    /// route cannot come to depend on the value being processed. See
+    /// <see cref="ChainDeclarationException"/>.
+    /// </remarks>
+    public bool IsDeclaringChain { get; private set; }
+
+    /// <summary>
+    /// Reads this train's declared route without resolving or running any junction.
+    /// </summary>
+    /// <remarks>
+    /// Every chain call answers by recording its type arguments, so the result is the sequence
+    /// of types the train declares. Nothing touches the container and nothing executes, which is
+    /// what makes this safe to run for every registered train at host startup.
+    /// </remarks>
+    /// <exception cref="ChainDeclarationException">
+    /// The train read per-execution state while declaring its route.
+    /// </exception>
+    public ChainRecorder DeclaredChain()
+    {
+        var recorder = new ChainRecorder();
+        var monad = NewMonad();
+        monad.Recorder = recorder;
+
+        _monad = monad;
+        IsDeclaringChain = true;
+
+        try
+        {
+            // Every step completes synchronously while recording, so the returned task is
+            // already finished and carries only the discarded sentinel.
+            _ = Junctions();
+        }
+        finally
+        {
+            IsDeclaringChain = false;
+            _monad = null;
+        }
+
+        return recorder;
     }
 
     /// <summary>

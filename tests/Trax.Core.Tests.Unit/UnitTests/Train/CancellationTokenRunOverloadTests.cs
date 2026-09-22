@@ -96,14 +96,14 @@ public class CancellationTokenRunOverloadTests : TestSetup
 
     private class SimpleTrain : Train<string, string>
     {
-        protected override Task<Either<Exception, string>> RunInternal(string input) =>
-            Activate(input).Chain(new ProcessJunction()).Resolve();
+        protected override Task<Either<Exception, string>> Junctions() =>
+            Chain(new ProcessJunction()).Resolve();
     }
 
     private class FailingTrain : Train<string, string>
     {
-        protected override Task<Either<Exception, string>> RunInternal(string input) =>
-            Activate(input).Chain(new FailJunction()).Resolve();
+        protected override Task<Either<Exception, string>> Junctions() =>
+            Chain(new FailJunction()).Resolve();
     }
 
     private class TokenCapturingTrain : Train<string, string>
@@ -123,8 +123,8 @@ public class CancellationTokenRunOverloadTests : TestSetup
 
         public JunctionTrain(Junction<string, string> junction) => _junction = junction;
 
-        protected override Task<Either<Exception, string>> RunInternal(string input) =>
-            Activate(input).Chain(_junction).Resolve();
+        protected override Task<Either<Exception, string>> Junctions() =>
+            Chain(_junction).Resolve();
     }
 
     private class ProcessJunction : Junction<string, string>

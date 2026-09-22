@@ -46,6 +46,12 @@ public partial class Monad<TInput, TReturn>
     internal bool ShortCircuitValueSet { get; set; }
 
     /// <summary>
+    /// Set when this monad is reading a route rather than running one. Every chain call then
+    /// records its type arguments here and returns without resolving or executing anything.
+    /// </summary>
+    internal ChainRecorder? Recorder { get; set; }
+
+    /// <summary>
     /// Creates a Monad for a pure Train (no ServiceProvider).
     /// </summary>
     internal Monad(Train<TInput, TReturn> train, CancellationToken cancellationToken)

@@ -94,27 +94,26 @@ public class ResolveTests : TestSetup
 
     private class TestTrain : Train<int, int>
     {
-        protected override Task<Either<Exception, int>> RunInternal(int input) =>
+        protected override Task<Either<Exception, int>> Junctions() =>
             throw new NotImplementedException();
     }
 
     private class TestStringTrain : Train<int, string>
     {
-        protected override Task<Either<Exception, string>> RunInternal(int input) =>
+        protected override Task<Either<Exception, string>> Junctions() =>
             throw new NotImplementedException();
     }
 
     private class TestObjectTrain : Train<object, object>
     {
-        protected override Task<Either<Exception, object>> RunInternal(object input) =>
+        protected override Task<Either<Exception, object>> Junctions() =>
             throw new NotImplementedException();
     }
 
     private class TestTupleTrain : Train<LanguageExt.Unit, (int, string)>
     {
-        protected override Task<Either<Exception, (int, string)>> RunInternal(
-            LanguageExt.Unit input
-        ) => throw new NotImplementedException();
+        protected override Task<Either<Exception, (int, string)>> Junctions() =>
+            throw new NotImplementedException();
     }
 
     private class TestShortCircuitJunction : Junction<int, string>

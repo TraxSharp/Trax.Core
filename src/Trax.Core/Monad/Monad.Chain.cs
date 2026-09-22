@@ -76,7 +76,10 @@ public partial class Monad<TInput, TReturn>
     /// </summary>
     // ReSharper disable once InconsistentNaming
     public MonadTask<TInput, TReturn> IChain<TJunction>()
-        where TJunction : class => new(IChainAsync<TJunction>());
+        where TJunction : class =>
+        Recorder is not null
+            ? RecordStep<TJunction>(ChainStepKind.IChain)
+            : new(IChainAsync<TJunction>());
 
     private Task<Monad<TInput, TReturn>> IChainAsync<TJunction>()
         where TJunction : class
@@ -104,7 +107,10 @@ public partial class Monad<TInput, TReturn>
     /// Creates and executes a junction by its type.
     /// </summary>
     public MonadTask<TInput, TReturn> Chain<TJunction>()
-        where TJunction : class => new(ChainAsync<TJunction>());
+        where TJunction : class =>
+        Recorder is not null
+            ? RecordStep<TJunction>(ChainStepKind.Chain)
+            : new(ChainAsync<TJunction>());
 
     private Task<Monad<TInput, TReturn>> ChainAsync<TJunction>()
         where TJunction : class
@@ -124,7 +130,10 @@ public partial class Monad<TInput, TReturn>
     /// Executes a junction instance.
     /// </summary>
     public MonadTask<TInput, TReturn> Chain<TJunction>(TJunction junctionInstance)
-        where TJunction : class => new(ChainAsync(junctionInstance));
+        where TJunction : class =>
+        Recorder is not null
+            ? RecordStep<TJunction>(ChainStepKind.Chain)
+            : new(ChainAsync(junctionInstance));
 
     private Task<Monad<TInput, TReturn>> ChainAsync<TJunction>(TJunction junctionInstance)
         where TJunction : class
@@ -175,4 +184,16 @@ public partial class Monad<TInput, TReturn>
         new(ChainJunction<TJunction, TIn, Unit>(new TJunction()));
 
     #endregion
+
+    /// <summary>
+    /// Writes one step to the recorder and hands back a completed monad, so a route reads as a
+    /// sequence of types without resolving a junction or running one.
+    /// </summary>
+    private MonadTask<TInput, TReturn> RecordStep<TJunction>(ChainStepKind kind)
+    {
+        var (tIn, tOut) = ReflectionHelpers.ExtractJunctionTypeArguments<TJunction>();
+        Recorder!.Record(kind, typeof(TJunction), tIn, tOut);
+
+        return new MonadTask<TInput, TReturn>(Task.FromResult(this));
+    }
 }

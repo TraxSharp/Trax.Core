@@ -189,11 +189,10 @@ public class TrainTests : TestSetup
     private class ChainTestWithShortCircuit(IPrepare prepare, IFerment ferment)
         : Train<Ingredients, List<GlassBottle>>
     {
-        protected override Task<Either<Exception, List<GlassBottle>>> RunInternal(Ingredients input)
+        protected override Task<Either<Exception, List<GlassBottle>>> Junctions()
         {
             var brew = new Brew();
-            return Activate(input)
-                .AddServices(prepare, ferment)
+            return AddServices(prepare, ferment)
                 .IChain<IPrepare>()
                 .Chain<Ferment>()
                 .Chain<TwoTupleJunctionTest>()
@@ -208,11 +207,10 @@ public class TrainTests : TestSetup
     private class ChainTestWithShortCircuitStaysLeft(IPrepare prepare, IFerment ferment)
         : Train<Ingredients, List<GlassBottle>>
     {
-        protected override Task<Either<Exception, List<GlassBottle>>> RunInternal(Ingredients input)
+        protected override Task<Either<Exception, List<GlassBottle>>> Junctions()
         {
             var brew = new Brew();
-            return Activate(input)
-                .AddServices(prepare, ferment)
+            return AddServices(prepare, ferment)
                 .IChain<IPrepare>()
                 .ShortCircuit<TripTryingToSteal>()
                 .Chain<Ferment>()
@@ -250,15 +248,14 @@ public class TrainTests : TestSetup
 
     private class AccessInnerPropertyTypeTrain : Train<OuterProperty, InnerProperty>
     {
-        protected override Task<Either<Exception, InnerProperty>> RunInternal(
-            OuterProperty input
-        ) => Task.FromResult(Activate(input).Extract<OuterProperty, InnerProperty>().Resolve());
+        protected override Task<Either<Exception, InnerProperty>> Junctions() =>
+            Task.FromResult(Extract<OuterProperty, InnerProperty>().Resolve());
     }
 
     private class AccessInnerFieldTypeTrain : Train<OuterField, InnerField>
     {
-        protected override Task<Either<Exception, InnerField>> RunInternal(OuterField input) =>
-            Task.FromResult(Activate(input).Extract<OuterField, InnerField>().Resolve());
+        protected override Task<Either<Exception, InnerField>> Junctions() =>
+            Task.FromResult(Extract<OuterField, InnerField>().Resolve());
     }
 
     private class StubFerment : Junction<BrewingJug, Unit>, IFerment

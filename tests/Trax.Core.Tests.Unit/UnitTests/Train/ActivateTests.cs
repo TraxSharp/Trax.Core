@@ -102,7 +102,7 @@ public class ActivateTests : TestSetup
 
     private class TestTrain : Train<object, string>
     {
-        protected override Task<Either<Exception, string>> RunInternal(object input) =>
+        protected override Task<Either<Exception, string>> Junctions() =>
             throw new NotImplementedException();
     }
 

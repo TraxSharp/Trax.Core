@@ -22,6 +22,15 @@ public partial class Monad<TInput, TReturn>
     /// <returns>Either the chain's result or an exception</returns>
     public Either<Exception, TReturn> Resolve()
     {
+        if (Recorder is not null)
+        {
+            Recorder.Record(ChainStepKind.Resolve, null, null, typeof(TReturn));
+
+            // A recorded route produces no value. The Left is a sentinel the reader discards;
+            // returning a default Right would hand LanguageExt a null for a reference TReturn.
+            return new ChainRecordedException();
+        }
+
         if (Exception is not null)
             return Exception;
 

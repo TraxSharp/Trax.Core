@@ -41,8 +41,7 @@ public class TrainTests
 
     private class NotImplementedTrain : Train<LanguageExt.Unit, LanguageExt.Unit>
     {
-        protected override async Task<Either<Exception, LanguageExt.Unit>> RunInternal(
-            LanguageExt.Unit input
-        ) => new NotImplementedException();
+        protected override async Task<Either<Exception, LanguageExt.Unit>> Junctions() =>
+            new NotImplementedException();
     }
 }
