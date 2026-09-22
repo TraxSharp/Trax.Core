@@ -17,7 +17,7 @@ public partial class Monad<TInput, TReturn>
     /// <param name="input">The primary input for the chain</param>
     /// <param name="otherInputs">Additional objects to store in Memory</param>
     /// <returns>The Monad instance for method chaining</returns>
-    public Monad<TInput, TReturn> Activate(TInput input, params object[] otherInputs)
+    internal Monad<TInput, TReturn> Activate(TInput input, params object[] otherInputs)
     {
         // Validate input is not null
         if (input is null)

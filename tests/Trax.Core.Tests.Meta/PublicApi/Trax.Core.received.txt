@@ -108,7 +108,6 @@ namespace Trax.Core.Monad
     }
     public class Monad<TInput, TReturn>
     {
-        public Trax.Core.Monad.Monad<TInput, TReturn> Activate(TInput input, params object[] otherInputs) { }
         public Trax.Core.Monad.Monad<TInput, TReturn> AddServices<T1>(T1 service) { }
         public Trax.Core.Monad.Monad<TInput, TReturn> AddServices<T1, T2>(T1 service1, T2 service2) { }
         public Trax.Core.Monad.Monad<TInput, TReturn> AddServices<T1, T2, T3>(T1 service1, T2 service2, T3 service3) { }
@@ -196,7 +195,6 @@ namespace Trax.Core.Train
         public System.Threading.CancellationToken CancellationToken { get; protected set; }
         public string ExternalId { get; set; }
         public bool IsDeclaringChain { get; }
-        public Trax.Core.Monad.Monad<TInput, TReturn> Activate(TInput input, params object[] otherInputs) { }
         protected Trax.Core.Monad.Monad<TInput, TReturn> AddServices<T1>(T1 service) { }
         protected Trax.Core.Monad.Monad<TInput, TReturn> AddServices<T1, T2>(T1 s1, T2 s2) { }
         protected Trax.Core.Monad.Monad<TInput, TReturn> AddServices<T1, T2, T3>(T1 s1, T2 s2, T3 s3) { }
@@ -226,7 +224,6 @@ namespace Trax.Core.Train
         protected LanguageExt.Either<System.Exception, TReturn> Resolve() { }
         public virtual System.Threading.Tasks.Task<TReturn> Run(TInput input, System.Threading.CancellationToken cancellationToken = default) { }
         public System.Threading.Tasks.Task<LanguageExt.Either<System.Exception, TReturn>> RunEither(TInput input) { }
-        protected virtual System.Threading.Tasks.Task<LanguageExt.Either<System.Exception, TReturn>> RunInternal(TInput input) { }
         protected Trax.Core.Train.MonadTask<TInput, TReturn> ShortCircuit<TJunction>()
             where TJunction :  class { }
         protected Trax.Core.Train.MonadTask<TInput, TReturn> ShortCircuit<TJunction>(TJunction instance)

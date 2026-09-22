@@ -71,13 +71,14 @@ public abstract class Train<TInput, TReturn> : IRoute<TInput, TReturn>
     public Task<Either<Exception, TReturn>> RunEither(TInput input) => RunInternal(input);
 
     /// <summary>
-    /// The core implementation method that executes the train's logic.
-    /// Override this for full control over the railway pipeline (advanced).
-    /// If not overridden, the default implementation calls Junctions().
+    /// Seeds the chain with the input and runs the junctions the train declares.
     /// </summary>
-    /// <param name="input">The input data for the train</param>
-    /// <returns>Either the result of the train or an exception</returns>
-    protected virtual async Task<Either<Exception, TReturn>> RunInternal(TInput input)
+    /// <remarks>
+    /// Private on purpose. A train says which junctions run, and nothing else: an override here
+    /// could build its chain imperatively, which would put the chain out of reach of the startup
+    /// check that reads every train's declaration before the host serves traffic.
+    /// </remarks>
+    private async Task<Either<Exception, TReturn>> RunInternal(TInput input)
     {
         _monad = NewMonad().Activate(input);
 
@@ -153,14 +154,15 @@ public abstract class Train<TInput, TReturn> : IRoute<TInput, TReturn>
         throw new NotImplementedException("Override either Junctions() or RunInternal().");
 
     /// <summary>
-    /// Creates a composable Monad helper for chaining junctions.
-    /// Used with the RunInternal API. Not needed when overriding Junctions().
+    /// Builds a monad seeded with the input, for code that needs one directly.
     /// </summary>
-    /// <param name="input">The primary input for the train</param>
-    /// <param name="otherInputs">Additional objects to store in the Monad's Memory</param>
-    /// <returns>A Monad instance for method chaining</returns>
-    public Monad<TInput, TReturn> Activate(TInput input, params object[] otherInputs) =>
-        new Monad<TInput, TReturn>(this, CancellationToken).Activate(input, otherInputs);
+    /// <remarks>
+    /// Internal on purpose. A train declares its chain through <c>Junctions()</c>; handing out a
+    /// seeded monad would let a caller build a chain imperatively, which is what keeps a chain
+    /// out of reach of the startup check. Trax's own tests use it to exercise the monad itself.
+    /// </remarks>
+    internal Monad<TInput, TReturn> Activate(TInput input, params object[] otherInputs) =>
+        NewMonad().Activate(input, otherInputs);
 
     #region Protected chain methods (Junctions API)
 
