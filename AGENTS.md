@@ -1,7 +1,7 @@
 # Trax.Core
 
 The foundation: trains, junctions, railway error propagation, the memory dictionary, the
-Roslyn analyzer, and the `Trax.Core.Testing` guard engines. It depends on nothing in the
+deprecated Roslyn analyzer, and the `Trax.Core.Testing` guard engines. It depends on nothing in the
 workspace, and the other seven code repos all depend on it, directly or through
 `Trax.Effect`, so a change here reaches every one of them and every consumer. Trax.Docs and
 Trax.Website hold no .NET reference to it.
@@ -17,7 +17,8 @@ if your work contradicts one, say so rather than silently overriding it.
 
 | Working on | Read first |
 | --- | --- |
-| the analyzer, or a new diagnostic | [0001](./docs/adr/0001-chain-composition-errors-are-compile-time.md), the ids are a published contract and the severity is deliberate |
+| the analyzer, or a new diagnostic | [0001](./docs/adr/0001-chain-composition-errors-are-compile-time.md), deprecated: it checks no chain that can be written today |
+| `Train.Junctions()`, `DeclaredChain()`, the chain recorder or `ChainVerification` | central `docs/0016`, a chain is a declaration, and the replay has to mirror how the runtime stores and finds values |
 
 Decisions binding more than one repo live in the central corpus at `Trax.Docs/adr/`, whose
 index lists them by repo. Eight name `core`: executable guards, exact version pinning, the
