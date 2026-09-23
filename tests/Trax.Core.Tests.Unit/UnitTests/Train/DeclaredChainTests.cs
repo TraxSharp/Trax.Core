@@ -201,6 +201,15 @@ public class DeclaredChainTests : TestSetup
         chain.Steps.Select(s => s.Kind).Should().Equal(ChainStepKind.Chain, ChainStepKind.Resolve);
     }
 
+    [Test]
+    public void DeclaredChain_ATypeThatIsNotAJunction_IsRefusedNotThrown()
+    {
+        var read = () => new NotAJunctionTrain().DeclaredChain();
+
+        read.Should().NotThrow();
+        read().Refusals.Should().ContainSingle().Which.Should().Contain("does not implement");
+    }
+
     private class StringLength : Junction<string, int>
     {
         public override Task<int> Run(string input) => Task.FromResult(input.Length);
@@ -333,5 +342,13 @@ public class DeclaredChainTests : TestSetup
     {
         protected override Task<Either<Exception, int>> Junctions() =>
             NewMonad().Chain<CountingJunction>().Resolve();
+    }
+
+    private class NotAJunction;
+
+    private class NotAJunctionTrain : Train<string, int>
+    {
+        protected override Task<Either<Exception, int>> Junctions() =>
+            Chain<NotAJunction>().Chain<StringLength>().Resolve();
     }
 }

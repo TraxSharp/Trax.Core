@@ -31,14 +31,8 @@ public abstract class Train<TInput, TReturn> : IRoute<TInput, TReturn>
     /// <summary>
     /// Internal Monad instance used by the Junctions() API.
     /// Set before Junctions() is called, whether the chain is being run or read.
-    /// Accessible via internal setter for ServiceTrain to initialize with ServiceProvider.
     /// </summary>
     private Monad<TInput, TReturn>? _monad;
-
-    internal Monad<TInput, TReturn>? TrainMonad
-    {
-        set => _monad = value;
-    }
 
     /// <summary>
     /// Executes the train with the provided input.

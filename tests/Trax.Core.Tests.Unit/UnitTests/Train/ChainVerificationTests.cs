@@ -224,6 +224,26 @@ public class ChainVerificationTests : TestSetup
                 && f.Reason.Contains("cannot be the train's result")
             );
 
+    [Test]
+    public async Task Verify_ATupleElementDeclaredAsABaseClass_IsSatisfiedWhateverSubtypeItHolds()
+    {
+        Verify<TupleBaseElementTrain, string, bool>().Should().BeEmpty();
+
+        // The run stores each element under its declared type too, so the subtype inside the
+        // tuple still satisfies a junction taking the base class.
+        var run = await new TupleBaseElementTrain().RunEither("x");
+        run.IsRight.Should().BeTrue();
+    }
+
+    [Test]
+    public async Task A_null_tuple_element_fails_as_a_missing_type_rather_than_crashing()
+    {
+        var run = await new NullTupleElementTrain().RunEither("x");
+
+        run.IsLeft.Should().BeTrue();
+        run.Swap().ValueUnsafe().Should().NotBeOfType<NullReferenceException>();
+    }
+
     private interface IIngredient;
 
     private record Ingredient : IIngredient;
@@ -413,5 +433,29 @@ public class ChainVerificationTests : TestSetup
     {
         protected override Task<Either<Exception, bool>> Junctions() =>
             ShortCircuit<StringLength>().Chain<StringToFlag>().Resolve();
+    }
+
+    private class StringToIngredientPair : Junction<string, (Ingredient Item, int Count)>
+    {
+        public override Task<(Ingredient, int)> Run(string input) =>
+            Task.FromResult<(Ingredient, int)>((new SpecialIngredient(), 1));
+    }
+
+    private class TupleBaseElementTrain : Train<string, bool>
+    {
+        protected override Task<Either<Exception, bool>> Junctions() =>
+            Chain<StringToIngredientPair>().Chain<IngredientToFlag>().Resolve();
+    }
+
+    private class StringToNullPair : Junction<string, (Ingredient? Item, int Count)>
+    {
+        public override Task<(Ingredient?, int)> Run(string input) =>
+            Task.FromResult<(Ingredient?, int)>((null, 1));
+    }
+
+    private class NullTupleElementTrain : Train<string, bool>
+    {
+        protected override Task<Either<Exception, bool>> Junctions() =>
+            Chain<StringToNullPair>().Chain<IngredientToFlag>().Resolve();
     }
 }

@@ -209,7 +209,25 @@ public partial class Monad<TInput, TReturn>
     /// </summary>
     private MonadTask<TInput, TReturn> RecordStep<TJunction>(ChainStepKind kind)
     {
-        var (tIn, tOut) = ReflectionHelpers.ExtractJunctionTypeArguments<TJunction>();
+        Type tIn,
+            tOut;
+
+        try
+        {
+            (tIn, tOut) = ReflectionHelpers.ExtractJunctionTypeArguments<TJunction>();
+        }
+        catch (InvalidOperationException)
+        {
+            // A type that is not a junction fails every run; reading the chain reports it
+            // alongside everything else instead of throwing out of DeclaredChain.
+            Recorder!.Refuse(
+                $"{kind} names {typeof(TJunction).Name}, which does not implement "
+                    + "IJunction<TIn, TOut>."
+            );
+
+            return new MonadTask<TInput, TReturn>(Task.FromResult(this));
+        }
+
         Recorder!.Record(kind, typeof(TJunction), tIn, tOut);
 
         return new MonadTask<TInput, TReturn>(Task.FromResult(this));
