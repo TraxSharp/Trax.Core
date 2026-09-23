@@ -18,8 +18,15 @@ public enum FailureClass
     Unclassified = 0,
 
     /// <summary>
-    /// Expected to succeed if attempted again — a timeout, a throttle, a lost connection.
+    /// Expected to succeed if attempted again: a throttle, a lost connection, a server timeout
+    /// reported as an error.
     /// </summary>
+    /// <remarks>
+    /// A client-side timeout that surfaces as an <see cref="OperationCanceledException"/>, as an
+    /// <c>HttpClient</c> timeout does, is recorded as a cancellation and never reaches a classifier.
+    /// Catch it in the junction and rethrow it as something the classifier recognises to have it
+    /// counted here.
+    /// </remarks>
     Transient = 1,
 
     /// <summary>
