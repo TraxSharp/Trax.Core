@@ -1,5 +1,6 @@
 using FluentAssertions;
 using LanguageExt;
+using LanguageExt.UnsafeValueAccess;
 using Trax.Core.Junction;
 using Trax.Core.Monad;
 using Trax.Core.Train;
@@ -50,13 +51,99 @@ public class ChainVerificationTests : TestSetup
     }
 
     [Test]
-    public void Verify_AShortCircuitSupplyingTheReturnValue_IsNotReported() =>
-        Verify<ShortCircuitTrain, string, bool>()
+    public void Verify_AShortCircuitAlone_DoesNotSupplyTheReturnValue() =>
+        Verify<ShortCircuitOnlyTrain, string, bool>()
             .Should()
-            .BeEmpty(
-                "a short circuit supplies the return value itself, so the chain can end without "
-                    + "the return type ever entering Memory"
+            .ContainSingle(f => f.Kind == ChainStepKind.Resolve)
+            .Which.Reason.Should()
+            .Contain(
+                "nothing for Resolve to return",
+                "a short circuit that returns Left lets the chain run on, and nothing after it "
+                    + "produces the return type"
             );
+
+    [Test]
+    public void Verify_AShortCircuitFollowedByAProducer_ReportsNothing() =>
+        Verify<ShortCircuitThenProducerTrain, string, bool>().Should().BeEmpty();
+
+    [Test]
+    public void Verify_AShortCircuitsOutput_IsNotAvailableToLaterJunctions() =>
+        Verify<ReadsShortCircuitOutputTrain, string, bool>()
+            .Should()
+            .ContainSingle(f => f.Junction == typeof(IntToBool))
+            .Which.Reason.Should()
+            .Contain(
+                "Int32",
+                "on the path that continues, the short circuit returned Left and stored nothing"
+            );
+
+    [Test]
+    public async Task Verify_AnInterfaceAJunctionsOutputImplements_IsNotAvailable()
+    {
+        Verify<OutputInterfaceTrain, string, bool>()
+            .Should()
+            .ContainSingle(f => f.Junction == typeof(IngredientToBool))
+            .Which.Reason.Should()
+            .Contain("IIngredient");
+
+        // The replay exists to predict the run, so the run has to fail the same way.
+        var run = await new OutputInterfaceTrain().RunEither("flour");
+
+        run.IsLeft.Should().BeTrue();
+        run.Swap()
+            .ValueUnsafe()
+            .Message.Should()
+            .Contain(
+                "IIngredient",
+                "a junction's output enters Memory under its declared type only"
+            );
+    }
+
+    [Test]
+    public void Verify_AValuePassedToAddServices_IsAvailableUnderThePassedType() =>
+        Verify<AddServicesTrain, string, bool>()
+            .Should()
+            .BeEmpty("AddServices puts the value in Memory without a junction producing it");
+
+    [Test]
+    public void Verify_AValuePassedToExtract_IsAvailable() =>
+        Verify<ExtractValueTrain, string, bool>().Should().BeEmpty();
+
+    [Test]
+    public void Verify_ExtractFromATypeOnlyTheContainerHolds_IsReported() =>
+        ChainVerification
+            .Verify(
+                new ExtractFromAmbientTrain().DeclaredChain(),
+                typeof(string),
+                typeof(bool),
+                type => type == typeof(IAmbient)
+            )
+            .Should()
+            .ContainSingle(f => f.Kind == ChainStepKind.Extract)
+            .Which.Reason.Should()
+            .Contain("does not fall back to the container");
+
+    [Test]
+    public void Verify_IChainOfAJunctionNothingHolds_IsReported()
+    {
+        var chain = new InterfaceJunctionTrain().DeclaredChain();
+
+        ChainVerification
+            .Verify(chain, typeof(string), typeof(bool))
+            .Should()
+            .Contain(f => f.Kind == ChainStepKind.IChain && f.Reason.Contains("neither holds one"));
+
+        ChainVerification
+            .Verify(chain, typeof(string), typeof(bool), type => type == typeof(ILengthJunction))
+            .Should()
+            .BeEmpty("a registered junction interface is what IChain resolves");
+    }
+
+    [Test]
+    public void Verify_ARefusedDeclaration_IsReportedAsAFault() =>
+        Verify<ValueResolvingTrain, string, bool>()
+            .Should()
+            .ContainSingle(f => f.Reason.Contains("Resolve(value)"));
 
     [Test]
     public void Verify_ATupleOutput_MakesItsElementsAvailable() =>
@@ -171,10 +258,77 @@ public class ChainVerificationTests : TestSetup
             Chain<StringToUnit>().Resolve();
     }
 
-    private class ShortCircuitTrain : Train<string, bool>
+    private class StringToFlag : Junction<string, bool>
+    {
+        public override Task<bool> Run(string input) => Task.FromResult(input.Length > 0);
+    }
+
+    private class StringToIngredient : Junction<string, Ingredient>
+    {
+        public override Task<Ingredient> Run(string input) => Task.FromResult(new Ingredient());
+    }
+
+    private interface ILengthJunction : IJunction<string, int>;
+
+    private class Ambient : IAmbient
+    {
+        public int Level { get; } = 1;
+    }
+
+    private record Holder(int Count);
+
+    private class ShortCircuitOnlyTrain : Train<string, bool>
     {
         protected override Task<Either<Exception, bool>> Junctions() =>
-            ShortCircuit<StringToUnit>().Resolve();
+            ShortCircuit<StringToFlag>().Resolve();
+    }
+
+    private class ShortCircuitThenProducerTrain : Train<string, bool>
+    {
+        protected override Task<Either<Exception, bool>> Junctions() =>
+            ShortCircuit<StringToFlag>().Chain<StringToFlag>().Resolve();
+    }
+
+    private class ReadsShortCircuitOutputTrain : Train<string, bool>
+    {
+        protected override Task<Either<Exception, bool>> Junctions() =>
+            ShortCircuit<StringLength>().Chain<IntToBool>().Resolve();
+    }
+
+    private class OutputInterfaceTrain : Train<string, bool>
+    {
+        protected override Task<Either<Exception, bool>> Junctions() =>
+            Chain<StringToIngredient>().Chain<IngredientToBool>().Resolve();
+    }
+
+    private class AddServicesTrain : Train<string, bool>
+    {
+        protected override Task<Either<Exception, bool>> Junctions() =>
+            AddServices<IAmbient>(new Ambient()).Chain<AmbientToFlag>().Resolve();
+    }
+
+    private class ExtractValueTrain : Train<string, bool>
+    {
+        protected override Task<Either<Exception, bool>> Junctions() =>
+            Extract<Holder, int>(new Holder(2)).Chain<IntToBool>().Resolve();
+    }
+
+    private class ExtractFromAmbientTrain : Train<string, bool>
+    {
+        protected override Task<Either<Exception, bool>> Junctions() =>
+            Extract<IAmbient, int>().Chain<IntToBool>().Resolve();
+    }
+
+    private class InterfaceJunctionTrain : Train<string, bool>
+    {
+        protected override Task<Either<Exception, bool>> Junctions() =>
+            IChain<ILengthJunction>().Chain<IntToBool>().Resolve();
+    }
+
+    private class ValueResolvingTrain : Train<string, bool>
+    {
+        protected override Task<Either<Exception, bool>> Junctions() =>
+            Chain<StringToFlag>().Resolve(true);
     }
 
     private class TupleProducingTrain : Train<string, bool>

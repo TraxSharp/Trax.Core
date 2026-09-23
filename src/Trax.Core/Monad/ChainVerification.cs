@@ -27,11 +27,17 @@ public readonly record struct ChainFault(
 /// on the path that reaches it; replayed here, it is a fact about the train that a host can check
 /// for every train it has registered before it serves any traffic.
 ///
-/// <para>The replay is conservative in one direction. It knows the types a chain declares, not
-/// the concrete types that will flow, so a junction declaring an interface its runtime value
-/// implements only incidentally reads as a fault. That is the same blind spot
-/// <c>TrainChainAnalyzer</c> has, and the reason a fault is reported rather than assumed
-/// fatal.</para>
+/// <para>The replay mirrors how the runtime stores and finds values, and the two differ by
+/// source. The train's input enters Memory under its type and every interface it implements; a
+/// junction's output, an extracted value and a service handed to <c>AddServices</c> enter under
+/// exactly one type; a tuple contributes each element under its type and interfaces. Lookup is by
+/// exact type, falling back to the container. A junction asking for an interface its producer's
+/// declared output only implements is therefore a fault here because it fails at runtime.</para>
+///
+/// <para>What the replay cannot see is the concrete type of the train's input at runtime, only
+/// the declared one. A junction asking for an interface that only a subtype of the declared input
+/// implements reads as a fault, although the run would find it. Declaring the input as that
+/// subtype fixes both.</para>
 /// </remarks>
 public static class ChainVerification
 {
@@ -55,7 +61,7 @@ public static class ChainVerification
     )
     {
         var memory = new System.Collections.Generic.HashSet<Type> { typeof(Unit) };
-        Remember(memory, input);
+        Remember(memory, input, withInterfaces: true);
 
         var faults = new List<ChainFault>();
         var steps = chain.Steps;
@@ -64,24 +70,69 @@ public static class ChainVerification
         {
             var step = steps[i];
 
-            if (step.Kind == ChainStepKind.Resolve)
+            switch (step.Kind)
             {
-                // A short circuit supplies the return value itself, so a chain carrying one can
-                // reach its end without the return type ever entering Memory.
-                var shortCircuited = steps.Take(i).Any(s => s.Kind == ChainStepKind.ShortCircuit);
+                case ChainStepKind.Resolve:
+                    // A short circuit that returns Left lets the chain run on, so the rest of the
+                    // chain still has to produce the return type for the path where it does.
+                    if (!Satisfied(memory, output, availableElsewhere))
+                        faults.Add(
+                            new ChainFault(
+                                i,
+                                step.Kind,
+                                null,
+                                $"the chain ends without '{Name(output)}' in Memory, so there is "
+                                    + "nothing for Resolve to return. Chain a junction that "
+                                    + "produces it."
+                            )
+                        );
 
-                if (!shortCircuited && !Satisfied(memory, output, availableElsewhere))
-                    faults.Add(
-                        new ChainFault(
-                            i,
-                            step.Kind,
-                            null,
-                            $"the chain ends without '{Name(output)}' in Memory, so there is "
-                                + "nothing for Resolve to return. Chain a junction that produces it."
-                        )
-                    );
+                    continue;
 
-                continue;
+                case ChainStepKind.Seed:
+                    if (step.Out is { } seeded)
+                        memory.Add(seeded);
+
+                    continue;
+
+                case ChainStepKind.Extract:
+                    // Extract reads Memory only; unlike a junction input it never asks the
+                    // container.
+                    if (step.In is { } source && !memory.Contains(source))
+                        faults.Add(
+                            new ChainFault(
+                                i,
+                                step.Kind,
+                                null,
+                                $"extracts from '{Name(source)}', which nothing before it puts in "
+                                    + "Memory. Extract does not fall back to the container."
+                            )
+                        );
+
+                    if (step.Out is { } extracted)
+                        memory.Add(extracted);
+
+                    continue;
+
+                case ChainStepKind.IChain:
+                    // IChain finds the junction itself in Memory or the container before it can
+                    // ask the junction for its input.
+                    if (
+                        step.Junction is { } contract
+                        && !Satisfied(memory, contract, availableElsewhere)
+                    )
+                        faults.Add(
+                            new ChainFault(
+                                i,
+                                step.Kind,
+                                step.Junction,
+                                $"resolves the junction '{Name(contract)}' from Memory or the "
+                                    + "container and neither holds one. Register it, or use Chain "
+                                    + "with the concrete junction type."
+                            )
+                        );
+
+                    break;
             }
 
             if (step.In is { } required && !Satisfied(memory, required, availableElsewhere))
@@ -95,9 +146,15 @@ public static class ChainVerification
                     )
                 );
 
-            if (step.Out is { } produced)
-                Remember(memory, produced);
+            // A short circuit's output reaches Memory only when it returns Right, and on that
+            // path the chain's result is already decided. The path that continues past it is
+            // the one where it returned Left and stored nothing.
+            if (step.Kind != ChainStepKind.ShortCircuit && step.Out is { } produced)
+                Remember(memory, produced, withInterfaces: false);
         }
+
+        foreach (var refusal in chain.Refusals)
+            faults.Add(new ChainFault(steps.Count, ChainStepKind.Resolve, null, refusal));
 
         return faults;
     }
@@ -107,8 +164,8 @@ public static class ChainVerification
     /// </summary>
     /// <remarks>
     /// Mirrors the three ways the runtime finds one: a tuple is assembled from its elements
-    /// rather than looked up whole, anything else is taken from Memory, and failing that the
-    /// container is asked.
+    /// rather than looked up whole, anything else is taken from Memory by its exact type, and
+    /// failing that the container is asked.
     /// </remarks>
     private static bool Satisfied(
         System.Collections.Generic.HashSet<Type> memory,
@@ -125,20 +182,28 @@ public static class ChainVerification
     }
 
     /// <summary>
-    /// Mirrors what a value entering Memory makes available: its own type and every interface it
-    /// implements, with a tuple contributing each of its elements rather than itself.
+    /// Mirrors what a value entering Memory makes available. A tuple always contributes each
+    /// element under its type and interfaces. Anything else contributes its own type, plus its
+    /// interfaces only when it is the train's input.
     /// </summary>
-    private static void Remember(System.Collections.Generic.HashSet<Type> memory, Type type)
+    private static void Remember(
+        System.Collections.Generic.HashSet<Type> memory,
+        Type type,
+        bool withInterfaces
+    )
     {
         if (type.IsTuple())
         {
             foreach (var element in type.GetGenericArguments())
-                Remember(memory, element);
+                Remember(memory, element, withInterfaces: true);
 
             return;
         }
 
         memory.Add(type);
+
+        if (!withInterfaces)
+            return;
 
         foreach (var contract in type.GetInterfaces())
             memory.Add(contract);

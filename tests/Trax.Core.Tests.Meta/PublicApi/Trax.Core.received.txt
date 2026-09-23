@@ -105,6 +105,7 @@ namespace Trax.Core.Monad
     public sealed class ChainRecorder
     {
         public ChainRecorder() { }
+        public System.Collections.Generic.IReadOnlyList<string> Refusals { get; }
         public System.Collections.Generic.IReadOnlyList<Trax.Core.Monad.ChainStep> Steps { get; }
     }
     public readonly struct ChainStep : System.IEquatable<Trax.Core.Monad.ChainStep>
@@ -122,6 +123,7 @@ namespace Trax.Core.Monad
         ShortCircuit = 2,
         Extract = 3,
         Resolve = 4,
+        Seed = 5,
     }
     public static class ChainVerification
     {

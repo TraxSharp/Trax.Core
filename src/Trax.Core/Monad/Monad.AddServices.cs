@@ -186,6 +186,16 @@ public partial class Monad<TInput, TReturn>
     /// </summary>
     internal Monad<TInput, TReturn> AddServices(object[] services, Type[] typeArray)
     {
+        if (Recorder is not null)
+        {
+            // Each service lands in Memory under the interface it was passed as, so that is the
+            // type the rest of the chain can find.
+            foreach (var serviceType in typeArray)
+                Recorder.Record(ChainStepKind.Seed, null, null, serviceType);
+
+            return this;
+        }
+
         foreach (var service in services)
         {
             var serviceType = service.GetType();

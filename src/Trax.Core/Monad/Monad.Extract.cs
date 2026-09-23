@@ -33,6 +33,12 @@ public partial class Monad<TInput, TReturn>
     /// </summary>
     public Monad<TInput, TReturn> Extract<TIn, TOut>(TIn input)
     {
+        if (Recorder is not null)
+        {
+            Recorder.Record(ChainStepKind.Seed, null, null, typeof(TOut));
+            return this;
+        }
+
         if (input is null)
         {
             Exception ??= new TrainException(

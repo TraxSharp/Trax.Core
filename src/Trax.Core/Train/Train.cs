@@ -30,7 +30,7 @@ public abstract class Train<TInput, TReturn> : IRoute<TInput, TReturn>
 
     /// <summary>
     /// Internal Monad instance used by the Junctions() API.
-    /// Set by the default RunInternal before calling Junctions().
+    /// Set before Junctions() is called, whether the chain is being run or read.
     /// Accessible via internal setter for ServiceTrain to initialize with ServiceProvider.
     /// </summary>
     private Monad<TInput, TReturn>? _monad;
@@ -100,25 +100,30 @@ public abstract class Train<TInput, TReturn> : IRoute<TInput, TReturn>
     protected virtual Monad<TInput, TReturn> NewMonad() => new(this, CancellationToken);
 
     /// <summary>
-    /// True while this train's route is being read rather than run.
+    /// True while this train's chain is being read rather than run.
     /// </summary>
     /// <remarks>
-    /// Per-execution state is unavailable during route reading and accessors for it throw, so a
-    /// route cannot come to depend on the value being processed. See
+    /// Per-execution state is unavailable while a chain is read and accessors for it throw, so a
+    /// chain cannot come to depend on the value being processed. See
     /// <see cref="ChainDeclarationException"/>.
     /// </remarks>
     public bool IsDeclaringChain { get; private set; }
 
     /// <summary>
-    /// Reads this train's declared route without resolving or running any junction.
+    /// Reads this train's declared chain without resolving or running any junction.
     /// </summary>
     /// <remarks>
     /// Every chain call answers by recording its type arguments, so the result is the sequence
-    /// of types the train declares. Nothing touches the container and nothing executes, which is
-    /// what makes this safe to run for every registered train at host startup.
+    /// of types the train declares. Nothing touches the container and no junction executes.
+    ///
+    /// <para><c>Junctions()</c> itself does run, which is why it has to be a pure declaration. A
+    /// body that awaits before returning, or that returns a result instead of ending in
+    /// <c>Resolve()</c>, has no chain to read, and that is recorded in
+    /// <see cref="ChainRecorder.Refusals"/> rather than reported as a clean train. Whatever such a
+    /// body started is not undone.</para>
     /// </remarks>
     /// <exception cref="ChainDeclarationException">
-    /// The train read per-execution state while declaring its route.
+    /// The train read per-execution state while declaring its chain.
     /// </exception>
     public ChainRecorder DeclaredChain()
     {
@@ -131,9 +136,40 @@ public abstract class Train<TInput, TReturn> : IRoute<TInput, TReturn>
 
         try
         {
-            // Every step completes synchronously while recording, so the returned task is
-            // already finished and carries only the discarded sentinel.
-            _ = Junctions();
+            var declared = Junctions();
+
+            if (!declared.IsCompleted)
+            {
+                // Every step completes synchronously while recording, so a task still running
+                // here is waiting on something the body started itself. Its outcome belongs to
+                // no one, so it is observed and dropped rather than left to surface unobserved.
+                _ = declared.ContinueWith(
+                    t => _ = t.Exception,
+                    CancellationToken.None,
+                    TaskContinuationOptions.OnlyOnFaulted
+                        | TaskContinuationOptions.ExecuteSynchronously,
+                    TaskScheduler.Default
+                );
+
+                recorder.Refuse(
+                    "Junctions() awaited something before returning, so it does work instead of "
+                        + "declaring a chain. Declare the chain without awaiting and move the work "
+                        + "into a junction."
+                );
+            }
+            else
+            {
+                // An async body's exceptions, ChainDeclarationException included, land in the
+                // task rather than propagating, so they are rethrown here.
+                var result = declared.GetAwaiter().GetResult();
+
+                if (!result.IsLeft || result.Swap().ValueUnsafe() is not ChainRecordedException)
+                    recorder.Refuse(
+                        "Junctions() returned a result instead of ending its chain with "
+                            + "Resolve(), so there is no chain to verify. Chain the junction that "
+                            + "produces the result and end with Resolve()."
+                    );
+            }
         }
         finally
         {
@@ -147,11 +183,11 @@ public abstract class Train<TInput, TReturn> : IRoute<TInput, TReturn>
     /// <summary>
     /// Defines the train's junction chain. Override this to declare which junctions
     /// the train executes. The chain returns Task&lt;Either&lt;Exception, TReturn&gt;&gt;,
-    /// which the default RunInternal awaits and propagates.
+    /// which the train awaits and propagates when it runs.
     /// </summary>
     /// <returns>The train's railway result</returns>
     protected virtual Task<Either<Exception, TReturn>> Junctions() =>
-        throw new NotImplementedException("Override either Junctions() or RunInternal().");
+        throw new NotImplementedException("Override Junctions() to declare this train's chain.");
 
     /// <summary>
     /// Builds a monad seeded with the input, for code that needs one directly.

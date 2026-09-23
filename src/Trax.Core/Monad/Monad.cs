@@ -5,7 +5,7 @@ namespace Trax.Core.Monad;
 
 /// <summary>
 /// The composable monadic computation context for Trax.Core.
-/// Returned by Train.Activate(), this class provides the fluent Chain/Resolve/Extract API
+/// Created for each run of a train, this class provides the fluent Chain/Resolve/Extract API
 /// for building Railway-oriented trains as a sequence of junctions.
 /// </summary>
 /// <typeparam name="TInput">The type of input the owning train accepts</typeparam>
@@ -46,7 +46,7 @@ public partial class Monad<TInput, TReturn>
     internal bool ShortCircuitValueSet { get; set; }
 
     /// <summary>
-    /// Set when this monad is reading a route rather than running one. Every chain call then
+    /// Set when this monad is reading a chain rather than running one. Every chain call then
     /// records its type arguments here and returns without resolving or executing anything.
     /// </summary>
     internal ChainRecorder? Recorder { get; set; }

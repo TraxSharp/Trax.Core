@@ -93,6 +93,82 @@ public class DeclaredChainTests : TestSetup
             .Equal(ChainStepKind.ShortCircuit, ChainStepKind.Extract, ChainStepKind.Resolve);
     }
 
+    [Test]
+    public void DeclaredChain_TheExplicitTypedOverloads_RecordTheirTypeArguments()
+    {
+        var steps = new ExplicitTypedTrain().DeclaredChain().Steps;
+
+        steps
+            .Should()
+            .Equal(
+                new ChainStep(
+                    ChainStepKind.Chain,
+                    typeof(StringLength),
+                    typeof(string),
+                    typeof(int)
+                ),
+                new ChainStep(ChainStepKind.Chain, typeof(IntToBool), typeof(int), typeof(bool)),
+                new ChainStep(ChainStepKind.Resolve, null, null, typeof(bool))
+            );
+    }
+
+    [Test]
+    public void DeclaredChain_AddServices_IsRecordedAsASeedUnderThePassedType()
+    {
+        var steps = new SeedingTrain().DeclaredChain().Steps;
+
+        steps[0].Should().Be(new ChainStep(ChainStepKind.Seed, null, null, typeof(ICounter)));
+        steps[1].Should().Be(new ChainStep(ChainStepKind.Seed, null, null, typeof(int)));
+    }
+
+    [Test]
+    public void DeclaredChain_AnAsyncBodyThatDoesNotAwaitFirst_IsAnOrdinaryDeclaration()
+    {
+        var chain = new AsyncWrapperTrain().DeclaredChain();
+
+        chain
+            .Refusals.Should()
+            .BeEmpty("an async body that awaits only the chain completes at once");
+        chain.Steps.Should().HaveCount(3);
+    }
+
+    [Test]
+    public void DeclaredChain_ABodyThatAwaitsBeforeReturning_IsRefused()
+    {
+        var chain = new AwaitingTrain().DeclaredChain();
+
+        chain.Refusals.Should().ContainSingle().Which.Should().Contain("awaited something");
+    }
+
+    [Test]
+    public void DeclaredChain_ABodyThatReturnsAResult_IsRefused()
+    {
+        var chain = new DirectReturnTrain().DeclaredChain();
+
+        chain.Steps.Should().BeEmpty();
+        chain.Refusals.Should().ContainSingle().Which.Should().Contain("returned a result");
+    }
+
+    [Test]
+    public void DeclaredChain_EndingWithResolveOfAValue_IsRefused()
+    {
+        var chain = new ValueResolvingTrain().DeclaredChain();
+
+        chain.Refusals.Should().ContainSingle().Which.Should().Contain("Resolve(value)");
+    }
+
+    [Test]
+    public void DeclaredChain_AnAsyncBodyThatThrows_Rethrows()
+    {
+        var act = () => new ThrowingAsyncTrain().DeclaredChain();
+
+        act.Should()
+            .Throw<InvalidOperationException>(
+                "an async body's exception lands in its task, and a clean result would hide it"
+            )
+            .WithMessage("declaration failed");
+    }
+
     private class StringLength : Junction<string, int>
     {
         public override Task<int> Run(string input) => Task.FromResult(input.Length);
@@ -148,5 +224,64 @@ public class DeclaredChainTests : TestSetup
     private class WrapperPassthrough : Junction<Wrapper, Wrapper>
     {
         public override Task<Wrapper> Run(Wrapper input) => Task.FromResult(input);
+    }
+
+    private interface ICounter;
+
+    private class Counter : ICounter;
+
+    private record Holder(int Count);
+
+    private class ExplicitTypedTrain : Train<string, bool>
+    {
+        protected override Task<Either<Exception, bool>> Junctions() =>
+            Chain<StringLength, string, int>().Chain<IntToBool, int, bool>().Resolve();
+    }
+
+    private class SeedingTrain : Train<string, bool>
+    {
+        protected override Task<Either<Exception, bool>> Junctions() =>
+            AddServices<ICounter>(new Counter())
+                .Extract<Holder, int>(new Holder(3))
+                .Chain<IntToBool>()
+                .Resolve();
+    }
+
+    private class AsyncWrapperTrain : Train<string, bool>
+    {
+        protected override async Task<Either<Exception, bool>> Junctions() =>
+            await Chain<StringLength>().Chain<IntToBool>().Resolve();
+    }
+
+    private class AwaitingTrain : Train<string, bool>
+    {
+        protected override async Task<Either<Exception, bool>> Junctions()
+        {
+            await Task.Yield();
+            return await Chain<StringLength>().Chain<IntToBool>().Resolve();
+        }
+    }
+
+    private class DirectReturnTrain : Train<string, bool>
+    {
+        protected override Task<Either<Exception, bool>> Junctions() =>
+            Task.FromResult<Either<Exception, bool>>(true);
+    }
+
+    private class ValueResolvingTrain : Train<string, bool>
+    {
+        protected override Task<Either<Exception, bool>> Junctions() =>
+            Chain<StringLength>().Resolve(true);
+    }
+
+    private class ThrowingAsyncTrain : Train<string, bool>
+    {
+        protected override async Task<Either<Exception, bool>> Junctions()
+        {
+            // An already-completed await keeps the body synchronous, so the throw lands in a
+            // finished task rather than propagating out of the call.
+            await Task.CompletedTask;
+            throw new InvalidOperationException("declaration failed");
+        }
     }
 }
