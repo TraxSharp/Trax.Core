@@ -19,11 +19,15 @@ if your work contradicts one, say so rather than silently overriding it.
 | --- | --- |
 | the analyzer, or a new diagnostic | [0001](./docs/adr/0001-chain-composition-errors-are-compile-time.md), deprecated: it checks no chain that can be written today |
 | `Train.Junctions()`, `DeclaredChain()`, the chain recorder or `ChainVerification` | central `docs/0016`, a chain is a declaration, and the replay has to mirror how the runtime stores and finds values |
+| `FailureClass`, or how a junction carries a failure's class in `TrainExceptionData` | central `docs/0020`, a failure is classified where it happens and the answer is carried |
 
 Decisions binding more than one repo live in the central corpus at `Trax.Docs/adr/`, whose
-index lists them by repo. Eight name `core`: executable guards, exact version pinning, the
+index lists them by repo. Fifteen name `core`: executable guards, exact version pinning, the
 dependency direction, the three test conventions (FluentAssertions, no `[Ignore]`, no fixed
-delays), the documentation lints, and the public API baseline. In a workspace checkout the
+delays), the documentation lints, the public API baseline, test frameworks staying out of shipped
+libraries, exemplars declared by attribute, Trax owning its vocabulary, tests owning their
+timeouts, every `PackageVersion` naming a referenced package, a chain being a declaration
+(`0016`), and failures being classified where they happen (`0020`). In a workspace checkout the
 index is at `../Trax.Docs/adr/README.md`; that path does not resolve on GitHub, because it
 crosses a repository boundary.
 
@@ -47,7 +51,7 @@ not to record. The format is
 
 ## Guards
 
-`tests/Trax.Core.Tests.Meta/` holds nine convention guards, and **all nine are shared** with
+`tests/Trax.Core.Tests.Meta/` holds eleven convention guards, and **all eleven are shared** with
 the other repos. Trax.Core owns no repo-specific guard, which is expected: the conventions it
 would enforce are workspace-wide, and the engines behind several of them ship from here in
 `Trax.Core.Testing` for consumers to subclass.
