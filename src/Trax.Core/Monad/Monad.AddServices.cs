@@ -191,7 +191,17 @@ public partial class Monad<TInput, TReturn>
             // Each service lands in Memory under the interface it was passed as, so that is the
             // type the rest of the chain can find.
             foreach (var serviceType in typeArray)
+            {
+                // A value is stored under an interface it implements; the runtime refuses a
+                // class on every run.
+                if (!serviceType.IsInterface)
+                    Recorder.Refuse(
+                        $"AddServices<{serviceType.Name}> names a class; a service is stored "
+                            + "under an interface it implements. Pass it as that interface."
+                    );
+
                 Recorder.Record(ChainStepKind.Seed, null, null, serviceType);
+            }
 
             return this;
         }

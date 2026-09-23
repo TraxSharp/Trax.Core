@@ -76,10 +76,20 @@ public partial class Monad<TInput, TReturn>
     /// </summary>
     // ReSharper disable once InconsistentNaming
     public MonadTask<TInput, TReturn> IChain<TJunction>()
-        where TJunction : class =>
-        Recorder is not null
-            ? RecordStep<TJunction>(ChainStepKind.IChain)
-            : new(IChainAsync<TJunction>());
+        where TJunction : class
+    {
+        if (Recorder is null)
+            return new(IChainAsync<TJunction>());
+
+        // The runtime refuses a non-interface on every run, so the declaration is refused too.
+        if (!typeof(TJunction).IsInterface)
+            Recorder.Refuse(
+                $"IChain<{typeof(TJunction).Name}> names a class; IChain resolves a junction by "
+                    + "its interface. Use Chain with a class."
+            );
+
+        return RecordStep<TJunction>(ChainStepKind.IChain);
+    }
 
     private Task<Monad<TInput, TReturn>> IChainAsync<TJunction>()
         where TJunction : class

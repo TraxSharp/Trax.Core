@@ -183,6 +183,44 @@ public class ChainVerificationTests : TestSetup
             .BeEmpty("a junction input not in Memory falls back to the container");
     }
 
+    [Test]
+    public async Task Verify_ATupleElementOnlyTheContainerHolds_IsReported()
+    {
+        // The runtime assembles a tuple from Memory alone, so a container-only element fails
+        // every run however the container is configured.
+        ChainVerification
+            .Verify(
+                new AmbientTupleTrain().DeclaredChain(),
+                typeof(string),
+                typeof(bool),
+                type => type == typeof(IAmbient)
+            )
+            .Should()
+            .ContainSingle(f => f.Junction == typeof(PairWithAmbientToFlag));
+
+        var run = await new AmbientTupleTrain().RunEither("x");
+        run.IsLeft.Should().BeTrue("the run cannot find the element either");
+    }
+
+    [Test]
+    public async Task Verify_AJunctionTakingTheDeclaredInput_IsSatisfiedWhateverSubtypeIsPassed()
+    {
+        Verify<BaseInputTrain, Ingredient, bool>().Should().BeEmpty();
+
+        // The run stores the input under its declared type as well as its concrete one.
+        var run = await new BaseInputTrain().RunEither(new SpecialIngredient());
+        run.IsRight.Should().BeTrue("a subtype of the declared input must satisfy it at runtime");
+    }
+
+    [Test]
+    public void Verify_AShortCircuitThatCannotBeTheResult_IsReported() =>
+        Verify<IncompatibleShortCircuitTrain, string, bool>()
+            .Should()
+            .Contain(f =>
+                f.Kind == ChainStepKind.ShortCircuit
+                && f.Reason.Contains("cannot be the train's result")
+            );
+
     private interface IIngredient;
 
     private record Ingredient : IIngredient;
@@ -341,5 +379,36 @@ public class ChainVerificationTests : TestSetup
     {
         protected override Task<Either<Exception, bool>> Junctions() =>
             Chain<IngredientToBool>().Resolve();
+    }
+
+    private record SpecialIngredient : Ingredient;
+
+    private class IngredientToFlag : Junction<Ingredient, bool>
+    {
+        public override Task<bool> Run(Ingredient input) => Task.FromResult(true);
+    }
+
+    private class BaseInputTrain : Train<Ingredient, bool>
+    {
+        protected override Task<Either<Exception, bool>> Junctions() =>
+            Chain<IngredientToFlag>().Resolve();
+    }
+
+    private class PairWithAmbientToFlag : Junction<(int Length, IAmbient Ambient), bool>
+    {
+        public override Task<bool> Run((int Length, IAmbient Ambient) input) =>
+            Task.FromResult(true);
+    }
+
+    private class AmbientTupleTrain : Train<string, bool>
+    {
+        protected override Task<Either<Exception, bool>> Junctions() =>
+            Chain<StringLength>().Chain<PairWithAmbientToFlag>().Resolve();
+    }
+
+    private class IncompatibleShortCircuitTrain : Train<string, bool>
+    {
+        protected override Task<Either<Exception, bool>> Junctions() =>
+            ShortCircuit<StringLength>().Chain<StringToFlag>().Resolve();
     }
 }

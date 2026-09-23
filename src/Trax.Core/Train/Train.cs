@@ -110,6 +110,12 @@ public abstract class Train<TInput, TReturn> : IRoute<TInput, TReturn>
     public bool IsDeclaringChain { get; private set; }
 
     /// <summary>
+    /// The recorder a chain is being read into, so that a monad created while declaring, by
+    /// <see cref="NewMonad"/> as much as by the train itself, records instead of running.
+    /// </summary>
+    internal ChainRecorder? ActiveRecorder { get; private set; }
+
+    /// <summary>
     /// Reads this train's declared chain without resolving or running any junction.
     /// </summary>
     /// <remarks>
@@ -128,11 +134,10 @@ public abstract class Train<TInput, TReturn> : IRoute<TInput, TReturn>
     public ChainRecorder DeclaredChain()
     {
         var recorder = new ChainRecorder();
-        var monad = NewMonad();
-        monad.Recorder = recorder;
-
-        _monad = monad;
+        ActiveRecorder = recorder;
         IsDeclaringChain = true;
+
+        _monad = NewMonad();
 
         try
         {
@@ -174,6 +179,7 @@ public abstract class Train<TInput, TReturn> : IRoute<TInput, TReturn>
         finally
         {
             IsDeclaringChain = false;
+            ActiveRecorder = null;
             _monad = null;
         }
 

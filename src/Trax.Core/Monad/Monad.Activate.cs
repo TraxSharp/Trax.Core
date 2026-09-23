@@ -33,6 +33,11 @@ public partial class Monad<TInput, TReturn>
             this.AddTupleToMemory(input);
         else
         {
+            // Store by the declared type as well as the concrete one, so a junction taking the
+            // train's declared input finds it whatever subtype was passed. The startup chain
+            // check assumes the declared type is present.
+            Memory[typeof(TInput)] = input;
+
             // Store by concrete type
             Memory[inputType] = input;
 

@@ -169,6 +169,35 @@ public class DeclaredChainTests : TestSetup
             .WithMessage("declaration failed");
     }
 
+    [Test]
+    public void DeclaredChain_IChainOfAClass_IsRefused() =>
+        new ClassIChainTrain()
+            .DeclaredChain()
+            .Refusals.Should()
+            .ContainSingle()
+            .Which.Should()
+            .Contain("names a class");
+
+    [Test]
+    public void DeclaredChain_AddServicesOfAClass_IsRefused() =>
+        new ClassServiceTrain()
+            .DeclaredChain()
+            .Refusals.Should()
+            .ContainSingle()
+            .Which.Should()
+            .Contain("names a class");
+
+    [Test]
+    public void DeclaredChain_AChainBuiltOnAFreshMonad_IsRecordedNotRun()
+    {
+        CountingJunction.Runs = 0;
+
+        var chain = new FreshMonadTrain().DeclaredChain();
+
+        CountingJunction.Runs.Should().Be(0, "reading a chain must never run a junction");
+        chain.Steps.Select(s => s.Kind).Should().Equal(ChainStepKind.Chain, ChainStepKind.Resolve);
+    }
+
     private class StringLength : Junction<string, int>
     {
         public override Task<int> Run(string input) => Task.FromResult(input.Length);
@@ -283,5 +312,23 @@ public class DeclaredChainTests : TestSetup
             await Task.CompletedTask;
             throw new InvalidOperationException("declaration failed");
         }
+    }
+
+    private class ClassIChainTrain : Train<string, bool>
+    {
+        protected override Task<Either<Exception, bool>> Junctions() =>
+            IChain<StringLength>().Chain<IntToBool>().Resolve();
+    }
+
+    private class ClassServiceTrain : Train<string, bool>
+    {
+        protected override Task<Either<Exception, bool>> Junctions() =>
+            AddServices(new Counter()).Chain<StringLength>().Chain<IntToBool>().Resolve();
+    }
+
+    private class FreshMonadTrain : Train<string, int>
+    {
+        protected override Task<Either<Exception, int>> Junctions() =>
+            NewMonad().Chain<CountingJunction>().Resolve();
     }
 }

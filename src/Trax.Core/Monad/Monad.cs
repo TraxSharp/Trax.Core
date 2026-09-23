@@ -59,6 +59,7 @@ public partial class Monad<TInput, TReturn>
         Train = train;
         CancellationToken = cancellationToken;
         Memory = new Dictionary<Type, object> { { typeof(Unit), Unit.Default } };
+        Recorder = train.ActiveRecorder;
     }
 
     /// <summary>
@@ -77,5 +78,6 @@ public partial class Monad<TInput, TReturn>
             { typeof(Unit), Unit.Default },
             { typeof(IServiceProvider), serviceProvider },
         };
+        Recorder = train.ActiveRecorder;
     }
 }

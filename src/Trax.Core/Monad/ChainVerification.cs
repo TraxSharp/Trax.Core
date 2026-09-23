@@ -35,9 +35,10 @@ public readonly record struct ChainFault(
 /// declared output only implements is therefore a fault here because it fails at runtime.</para>
 ///
 /// <para>What the replay cannot see is the concrete type of the train's input at runtime, only
-/// the declared one. A junction asking for an interface that only a subtype of the declared input
-/// implements reads as a fault, although the run would find it. Declaring the input as that
-/// subtype fixes both.</para>
+/// the declared one. The run stores the input under both, so everything the replay counts as
+/// available is; the reverse does not hold. A junction asking for an interface that only a
+/// subtype of the declared input implements reads as a fault, although the run would find it.
+/// Declaring the input as that subtype fixes both.</para>
 /// </remarks>
 public static class ChainVerification
 {
@@ -135,6 +136,24 @@ public static class ChainVerification
                     break;
             }
 
+            // A short circuit's Right value becomes the train's result by a cast, which throws
+            // unless its output can be the return type.
+            if (
+                step.Kind == ChainStepKind.ShortCircuit
+                && step.Out is { } shortCircuitOut
+                && !output.IsAssignableFrom(shortCircuitOut)
+            )
+                faults.Add(
+                    new ChainFault(
+                        i,
+                        step.Kind,
+                        step.Junction,
+                        $"short-circuits with '{Name(shortCircuitOut)}', which cannot be the "
+                            + $"train's result '{Name(output)}'. A short circuit's output is "
+                            + "returned as the result."
+                    )
+                );
+
             if (step.In is { } required && !Satisfied(memory, required, availableElsewhere))
                 faults.Add(
                     new ChainFault(
@@ -163,9 +182,9 @@ public static class ChainVerification
     /// Whether a junction can be handed something of this type.
     /// </summary>
     /// <remarks>
-    /// Mirrors the three ways the runtime finds one: a tuple is assembled from its elements
-    /// rather than looked up whole, anything else is taken from Memory by its exact type, and
-    /// failing that the container is asked.
+    /// Mirrors the ways the runtime finds one: a tuple is assembled from elements already in
+    /// Memory, and anything else is taken from Memory by its exact type or, failing that, from
+    /// the container.
     /// </remarks>
     private static bool Satisfied(
         System.Collections.Generic.HashSet<Type> memory,
@@ -173,10 +192,10 @@ public static class ChainVerification
         Func<Type, bool>? availableElsewhere
     )
     {
+        // A tuple is assembled from Memory alone; the runtime never asks the container for an
+        // element, so neither does the replay.
         if (required.IsTuple())
-            return required
-                .GetGenericArguments()
-                .All(element => Satisfied(memory, element, availableElsewhere));
+            return required.GetGenericArguments().All(memory.Contains);
 
         return memory.Contains(required) || (availableElsewhere?.Invoke(required) ?? false);
     }
