@@ -13,7 +13,10 @@ namespace Trax.Core.Tests.Unit.UnitTests.Train;
 /// call by recording type arguments, so the whole chain can be read for every registered train
 /// at host startup without resolving a junction from the container or performing any of the
 /// work the chain describes.</para>
+///
+/// <para>Enforces Trax.Docs/adr/0016-a-junction-chain-is-a-declaration-not-a-step-of-the-work.md.</para>
 /// </summary>
+[Property("adr", "Trax.Docs/adr/0016-a-junction-chain-is-a-declaration-not-a-step-of-the-work.md")]
 public class DeclaredChainTests : TestSetup
 {
     [Test]

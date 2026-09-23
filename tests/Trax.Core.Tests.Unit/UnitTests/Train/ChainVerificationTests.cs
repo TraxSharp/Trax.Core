@@ -13,7 +13,10 @@ namespace Trax.Core.Tests.Unit.UnitTests.Train;
 /// <para>Memory is keyed by type, so whether a chain lines up is decidable from the declaration
 /// alone. These pin the cases a host needs to be right about before it can refuse to start on
 /// the strength of them.</para>
+///
+/// <para>Enforces Trax.Docs/adr/0016-a-junction-chain-is-a-declaration-not-a-step-of-the-work.md.</para>
 /// </summary>
+[Property("adr", "Trax.Docs/adr/0016-a-junction-chain-is-a-declaration-not-a-step-of-the-work.md")]
 public class ChainVerificationTests : TestSetup
 {
     private static IReadOnlyList<ChainFault> Verify<TTrain, TIn, TOut>()

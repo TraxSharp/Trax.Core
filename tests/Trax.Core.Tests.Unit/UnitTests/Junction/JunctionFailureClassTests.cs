@@ -11,7 +11,10 @@ namespace Trax.Core.Tests.Unit.UnitTests.Junction;
 /// A junction that fails attaches fresh exception data, and a classification the failure already
 /// carried has to survive that. A remote run's worker classifies where it holds the real
 /// exception, and the calling side only ever sees the result through a junction.
+///
+/// <para>Enforces Trax.Docs/adr/0020-a-failure-is-classified-where-it-happens-and-carried.md.</para>
 /// </summary>
+[Property("adr", "Trax.Docs/adr/0020-a-failure-is-classified-where-it-happens-and-carried.md")]
 public class JunctionFailureClassTests : TestSetup
 {
     [Test]
