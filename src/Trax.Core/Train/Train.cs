@@ -263,9 +263,16 @@ public abstract class Train<TInput, TReturn> : IRoute<TInput, TReturn>
         _monad!.Extract<TIn, TOut>(input);
 
     /// <summary>
-    /// Executes a junction with short-circuit behavior.
-    /// If the junction produces TReturn, the chain ends early with that value.
+    /// Executes a junction with short-circuit behavior. If the junction returns Right, its
+    /// TReturn value becomes the train's result; if it returns Left, the failure is ignored.
     /// </summary>
+    /// <remarks>
+    /// A short circuit does not end the chain: the junctions after it still run, and a failure
+    /// in one of them still fails the train. What it decides is what <c>Resolve()</c> returns,
+    /// which is the short-circuited value in preference to anything later in Memory. A Right
+    /// output is also stored in Memory, but a Left stores nothing, so the chain check does not
+    /// count a short circuit's output as available to the junctions after it.
+    /// </remarks>
     protected MonadTask<TInput, TReturn> ShortCircuit<TJunction>()
         where TJunction : class => _monad!.ShortCircuit<TJunction>();
 

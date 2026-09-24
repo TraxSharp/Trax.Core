@@ -47,8 +47,10 @@ public partial class Monad<TInput, TReturn>
     #region Public API
 
     /// <summary>
-    /// Executes a junction with short-circuit behavior, potentially ending the chain early
-    /// if the junction returns a value of type TReturn.
+    /// Executes a junction with short-circuit behavior. If the junction returns Right, its
+    /// TReturn value becomes what <see cref="Resolve"/> returns; if it returns Left, the failure
+    /// is ignored. The chain does not end here: later junctions still run, and a failure in one
+    /// of them still fails the chain.
     /// </summary>
     public MonadTask<TInput, TReturn> ShortCircuit<TJunction>()
         where TJunction : class =>
@@ -68,8 +70,10 @@ public partial class Monad<TInput, TReturn>
     }
 
     /// <summary>
-    /// Executes a junction with short-circuit behavior, potentially ending the chain early
-    /// if the junction returns a value of type TReturn.
+    /// Executes a junction with short-circuit behavior. If the junction returns Right, its
+    /// TReturn value becomes what <see cref="Resolve"/> returns; if it returns Left, the failure
+    /// is ignored. The chain does not end here: later junctions still run, and a failure in one
+    /// of them still fails the chain.
     /// </summary>
     public MonadTask<TInput, TReturn> ShortCircuit<TJunction>(TJunction junctionInstance)
         where TJunction : class =>
