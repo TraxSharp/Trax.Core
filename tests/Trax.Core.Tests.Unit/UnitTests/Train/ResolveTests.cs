@@ -92,6 +92,30 @@ public class ResolveTests : TestSetup
         result.Swap().ValueUnsafe().Should().BeOfType<TrainException>();
     }
 
+    [Test]
+    public async Task Resolve_AValueAfterAFailedJunction_ReturnsTheFailure()
+    {
+        var result = await new TestStringTrain()
+            .Activate(1)
+            .Chain<FailingJunction>()
+            .Resolve("stated result");
+
+        result.IsLeft.Should().BeTrue("a stated result must not hide a failure before it");
+        result.Swap().ValueUnsafe().Message.Should().Be(FailingJunction.Failure);
+    }
+
+    [Test]
+    public async Task Resolve_AValueAfterACleanChain_ReturnsTheValue()
+    {
+        var result = await new TestStringTrain()
+            .Activate(1)
+            .Chain<TestShortCircuitJunction>()
+            .Resolve("stated result");
+
+        result.IsRight.Should().BeTrue();
+        result.ValueUnsafe().Should().Be("stated result");
+    }
+
     private class TestTrain : Train<int, int>
     {
         protected override Task<Either<Exception, int>> Junctions() =>
@@ -119,5 +143,12 @@ public class ResolveTests : TestSetup
     private class TestShortCircuitJunction : Junction<int, string>
     {
         public override async Task<string> Run(int input) => input.ToString();
+    }
+
+    private class FailingJunction : Junction<int, string>
+    {
+        public const string Failure = "the junction failed";
+
+        public override Task<string> Run(int input) => throw new InvalidOperationException(Failure);
     }
 }

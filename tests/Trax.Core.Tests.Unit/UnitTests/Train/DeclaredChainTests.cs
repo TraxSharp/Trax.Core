@@ -1,3 +1,4 @@
+using System.Runtime.CompilerServices;
 using FluentAssertions;
 using LanguageExt;
 using Trax.Core.Junction;
@@ -210,6 +211,115 @@ public class DeclaredChainTests : TestSetup
         read().Refusals.Should().ContainSingle().Which.Should().Contain("does not implement");
     }
 
+    [Test]
+    public async Task DeclaredChain_AJunctionPassedAsAnInstance_IsRecordedByItsTypeAndNotRun()
+    {
+        CountingJunction.Runs = 0;
+        var train = new InstanceTrain();
+
+        var chain = train.DeclaredChain();
+
+        CountingJunction.Runs.Should().Be(0, "handing over an instance must not run it either");
+        chain
+            .Steps.Should()
+            .Equal(
+                new ChainStep(
+                    ChainStepKind.ShortCircuit,
+                    typeof(CountingJunction),
+                    typeof(string),
+                    typeof(int)
+                ),
+                new ChainStep(
+                    ChainStepKind.Chain,
+                    typeof(CountingJunction),
+                    typeof(string),
+                    typeof(int)
+                ),
+                new ChainStep(ChainStepKind.Resolve, null, null, typeof(int))
+            );
+
+        (await train.Run("hello"))
+            .Should()
+            .Be(5, "the instances the declaration named are the ones the run executes");
+    }
+
+    [Test]
+    public async Task DeclaredChain_TheUnitOutputOverloads_RecordUnitAsTheOutput()
+    {
+        var expected = new[]
+        {
+            new ChainStep(
+                ChainStepKind.Chain,
+                typeof(StringToUnit),
+                typeof(string),
+                typeof(LanguageExt.Unit)
+            ),
+            new ChainStep(
+                ChainStepKind.Chain,
+                typeof(StringToUnit),
+                typeof(string),
+                typeof(LanguageExt.Unit)
+            ),
+            new ChainStep(ChainStepKind.Resolve, null, null, typeof(LanguageExt.Unit)),
+        };
+
+        new UnitInstanceFirstTrain().DeclaredChain().Steps.Should().Equal(expected);
+        new UnitParameterlessFirstTrain().DeclaredChain().Steps.Should().Equal(expected);
+
+        (await new UnitInstanceFirstTrain().RunEither("hello")).IsRight.Should().BeTrue();
+        (await new UnitParameterlessFirstTrain().RunEither("hello")).IsRight.Should().BeTrue();
+    }
+
+    [Test]
+    public void DeclaredChain_ABodyThatFailsAfterAwaiting_LeavesNoUnobservedException()
+    {
+        var gate = new TaskCompletionSource();
+        var unobserved = new List<Exception>();
+
+        void OnUnobserved(object? sender, UnobservedTaskExceptionEventArgs e) =>
+            unobserved.AddRange(e.Exception.InnerExceptions);
+
+        TaskScheduler.UnobservedTaskException += OnUnobserved;
+
+        try
+        {
+            ReadThenFail(gate).Should().ContainSingle().Which.Should().Contain("awaited something");
+
+            // The refused body's task is unreferenced now. Collecting it raises the event for a
+            // fault nobody observed.
+            GC.Collect();
+            GC.WaitForPendingFinalizers();
+            GC.Collect();
+            GC.WaitForPendingFinalizers();
+        }
+        finally
+        {
+            TaskScheduler.UnobservedTaskException -= OnUnobserved;
+        }
+
+        unobserved
+            .Should()
+            .NotContain(
+                e => e.Message == GatedFailingTrain.Failure,
+                "reading the chain started this body, so reading it has to observe the outcome"
+            );
+    }
+
+    /// <summary>
+    /// Reads the chain and lets its body fail, in a frame of its own so nothing on the test's
+    /// stack keeps the body's task alive.
+    /// </summary>
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private static IReadOnlyList<string> ReadThenFail(TaskCompletionSource gate)
+    {
+        var refusals = new GatedFailingTrain(gate.Task).DeclaredChain().Refusals;
+
+        // The body resumes inline here and faults after DeclaredChain has already returned.
+        gate.SetResult();
+
+        return refusals;
+    }
+
     private class StringLength : Junction<string, int>
     {
         public override Task<int> Run(string input) => Task.FromResult(input.Length);
@@ -350,5 +460,40 @@ public class DeclaredChainTests : TestSetup
     {
         protected override Task<Either<Exception, int>> Junctions() =>
             Chain<NotAJunction>().Chain<StringLength>().Resolve();
+    }
+
+    private class StringToUnit : Junction<string, LanguageExt.Unit>
+    {
+        public override Task<LanguageExt.Unit> Run(string input) =>
+            Task.FromResult(LanguageExt.Unit.Default);
+    }
+
+    private class InstanceTrain : Train<string, int>
+    {
+        protected override Task<Either<Exception, int>> Junctions() =>
+            ShortCircuit(new CountingJunction()).Chain(new CountingJunction()).Resolve();
+    }
+
+    private class UnitInstanceFirstTrain : Train<string, LanguageExt.Unit>
+    {
+        protected override Task<Either<Exception, LanguageExt.Unit>> Junctions() =>
+            Chain<StringToUnit, string>(new StringToUnit()).Chain<StringToUnit, string>().Resolve();
+    }
+
+    private class UnitParameterlessFirstTrain : Train<string, LanguageExt.Unit>
+    {
+        protected override Task<Either<Exception, LanguageExt.Unit>> Junctions() =>
+            Chain<StringToUnit, string>().Chain<StringToUnit, string>(new StringToUnit()).Resolve();
+    }
+
+    private class GatedFailingTrain(Task gate) : Train<string, bool>
+    {
+        public const string Failure = "failed after the declaration was read";
+
+        protected override async Task<Either<Exception, bool>> Junctions()
+        {
+            await gate;
+            throw new InvalidOperationException(Failure);
+        }
     }
 }

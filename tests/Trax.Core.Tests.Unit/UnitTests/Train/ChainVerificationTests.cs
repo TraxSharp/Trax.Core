@@ -113,6 +113,17 @@ public class ChainVerificationTests : TestSetup
         Verify<ExtractValueTrain, string, bool>().Should().BeEmpty();
 
     [Test]
+    public async Task Verify_AnExtractFromAnEarlierJunctionsOutput_IsSatisfied()
+    {
+        Verify<ExtractFromProducedTrain, string, bool>()
+            .Should()
+            .BeEmpty("the junction before it put the Extract's source in Memory");
+
+        var run = await new ExtractFromProducedTrain().RunEither("flour");
+        run.IsRight.Should().BeTrue("the run finds the source where the replay did");
+    }
+
+    [Test]
     public void Verify_ExtractFromATypeOnlyTheContainerHolds_IsReported() =>
         ChainVerification
             .Verify(
@@ -457,5 +468,16 @@ public class ChainVerificationTests : TestSetup
     {
         protected override Task<Either<Exception, bool>> Junctions() =>
             Chain<StringToNullPair>().Chain<IngredientToFlag>().Resolve();
+    }
+
+    private class StringToHolder : Junction<string, Holder>
+    {
+        public override Task<Holder> Run(string input) => Task.FromResult(new Holder(input.Length));
+    }
+
+    private class ExtractFromProducedTrain : Train<string, bool>
+    {
+        protected override Task<Either<Exception, bool>> Junctions() =>
+            Chain<StringToHolder>().Extract<Holder, int>().Chain<IntToBool>().Resolve();
     }
 }
