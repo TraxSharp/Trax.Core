@@ -63,9 +63,10 @@ that matters, that consumers stop seeing it, at no cost.
 
 ## Consequences
 
-The two members are public surface Trax does not support. Nothing stops a consumer overriding
-`NewMonad()` on a `ServiceTrain` subclass; it can only return what a base built, and it may be
-removed when Trax.Core and Trax.Effect next take a coordinated major.
+The two members are public surface Trax does not support. A consumer deriving from plain `Train`
+can still override `NewMonad()`, though it can only return what a base built. `ServiceTrain` seals
+its override from the next Trax.Effect minor (effect/0009), so a `ServiceTrain` subclass cannot. The
+member may be removed when Trax.Core and Trax.Effect next take a coordinated major.
 
 A narrowing of `NewMonad()` is a runtime break for every published Effect, which is why the
 member is pinned by a test rather than left to the public API baseline, which shows the diff but
