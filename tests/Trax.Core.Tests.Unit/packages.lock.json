@@ -20,15 +20,6 @@
         "resolved": "8.11.0",
         "contentHash": "dZqOxys9uY/0vO5BAwFtDECkFNSr9vWGwHa1fwZyuM1xAMbI4wiPTUBR2nH5e6R2/bQkXegxFY1B/oU1yqNNOw=="
       },
-      "Microsoft.Extensions.DependencyInjection": {
-        "type": "Direct",
-        "requested": "[10.0.12, )",
-        "resolved": "10.0.12",
-        "contentHash": "lXyK2O5GoYvfxW8eCFcD16JFbcoSTM1sJkAM0UHS1jZyl9NYMW64Tqm6OQFT0IDBjZi+xHt95/Zg+nxZhGFhZg==",
-        "dependencies": {
-          "Microsoft.Extensions.DependencyInjection.Abstractions": "10.0.12"
-        }
-      },
       "Microsoft.Extensions.Logging": {
         "type": "Direct",
         "requested": "[10.0.12, )",
@@ -209,6 +200,15 @@
         "contentHash": "K9VGWkThJkaomifa3zcmwysw1BaSqIZZPZc6trBnJN8u9mpmA/cMMwCWEa/v7bPv/+NnG6PbyIDB7HtxBX7yCQ==",
         "dependencies": {
           "Microsoft.Bcl.AsyncInterfaces": "7.0.0"
+        }
+      },
+      "Microsoft.Extensions.DependencyInjection": {
+        "type": "CentralTransitive",
+        "requested": "[10.0.12, )",
+        "resolved": "10.0.12",
+        "contentHash": "lXyK2O5GoYvfxW8eCFcD16JFbcoSTM1sJkAM0UHS1jZyl9NYMW64Tqm6OQFT0IDBjZi+xHt95/Zg+nxZhGFhZg==",
+        "dependencies": {
+          "Microsoft.Extensions.DependencyInjection.Abstractions": "10.0.12"
         }
       },
       "Microsoft.Extensions.DependencyInjection.Abstractions": {
