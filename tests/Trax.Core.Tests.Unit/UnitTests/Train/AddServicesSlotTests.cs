@@ -11,7 +11,10 @@ namespace Trax.Core.Tests.Unit.UnitTests.Train;
 /// <c>AddServices&lt;T1, T2&gt;(a, b)</c> stores <c>a</c> under <c>T1</c> and <c>b</c> under
 /// <c>T2</c>. The chain check records each type argument as a slot, so the run has to fill
 /// exactly those slots, whichever other interfaces the objects happen to implement.
+///
+/// <para>Enforces Trax.Docs/adr/0016-a-junction-chain-is-a-declaration-not-a-step-of-the-work.md.</para>
 /// </summary>
+[Property("adr", "Trax.Docs/adr/0016-a-junction-chain-is-a-declaration-not-a-step-of-the-work.md")]
 public class AddServicesSlotTests : TestSetup
 {
     [Test]
