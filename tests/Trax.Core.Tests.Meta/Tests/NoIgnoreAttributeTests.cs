@@ -9,10 +9,20 @@ namespace Trax.Core.Tests.Meta.Tests;
 [TestFixture]
 public class NoIgnoreAttributeTests
 {
-    private static readonly Regex IgnoreAttribute = new(
-        @"\[\s*Ignore(\s*\(|\s*\])",
-        RegexOptions.Compiled
-    );
+    // The same two patterns as Trax.Core.Testing's HygieneGuards.NoIgnoreAttribute: an [Ignore]
+    // anywhere in an attribute list (qualified, suffixed, or on a later line), and a per-case
+    // Ignore = or IgnoreReason = on a case or fixture attribute. Matched over the whole file.
+    private static readonly Regex[] IgnorePatterns =
+    [
+        new(
+            @"(?:\[|,)\s*(?:[\w.]+\.)?Ignore(?:Attribute)?(?=\s*(?:\(|\]|,))",
+            RegexOptions.Compiled
+        ),
+        new(
+            @"\[[^\]]*?\b(?:TestCase|TestCaseSource|TestFixture|TestFixtureSource)(?:Attribute)?\b[^\]]*?\b(?:Ignore|IgnoreReason)\s*=(?!=)",
+            RegexOptions.Compiled
+        ),
+    ];
 
     [Test]
     public void TestSources_DoNotUse_IgnoreAttribute()
@@ -27,8 +37,12 @@ public class NoIgnoreAttributeTests
 
             var content = File.ReadAllText(file);
             var stripped = SourceText.StripCommentsAndStrings(content);
-            var hits = SourceText.MatchingLines(stripped, IgnoreAttribute);
-            foreach (var (line, _) in hits)
+            var lines = new SortedSet<int>();
+            foreach (var pattern in IgnorePatterns)
+            foreach (Match match in pattern.Matches(stripped))
+                lines.Add(stripped.Take(match.Index).Count(c => c == '\n') + 1);
+
+            foreach (var line in lines)
                 offenders.Add($"{RepoRoot.Relative(file)}:{line}");
         }
 

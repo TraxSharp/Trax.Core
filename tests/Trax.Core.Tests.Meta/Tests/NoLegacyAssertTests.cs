@@ -23,6 +23,9 @@ public class NoLegacyAssertTests
         ("Assert.IsEmpty", new Regex(@"\bAssert\.IsEmpty\b", RegexOptions.Compiled)),
         ("Assert.IsNotEmpty", new Regex(@"\bAssert\.IsNotEmpty\b", RegexOptions.Compiled)),
         ("Assert.Contains", new Regex(@"\bAssert\.Contains\b", RegexOptions.Compiled)),
+        ("ClassicAssert", new Regex(@"\bClassicAssert\.\w+", RegexOptions.Compiled)),
+        ("CollectionAssert", new Regex(@"\bCollectionAssert\.\w+", RegexOptions.Compiled)),
+        ("StringAssert", new Regex(@"\bStringAssert\.\w+", RegexOptions.Compiled)),
     };
 
     [Test]
