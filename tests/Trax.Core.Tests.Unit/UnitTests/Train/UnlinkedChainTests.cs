@@ -1,6 +1,7 @@
 using FluentAssertions;
 using LanguageExt;
 using Trax.Core.Junction;
+using Trax.Core.Monad;
 using Trax.Core.Train;
 
 namespace Trax.Core.Tests.Unit.UnitTests.Train;
@@ -31,6 +32,18 @@ public class UnlinkedChainTests : TestSetup
     [Test]
     public void AStatementAfterAnAwaitedChain_StillVerifies() =>
         new AwaitedThenExtractTrain().DeclaredChain().Refusals.Should().BeEmpty();
+
+    [Test]
+    public void AStatementAfterAChainAwaitedWithConfigureAwait_StillVerifies() =>
+        new ConfigureAwaitThenExtractTrain().DeclaredChain().Refusals.Should().BeEmpty();
+
+    [Test]
+    public void AStatementAfterAChainAwaitedAsATask_StillVerifies() =>
+        new AsTaskThenExtractTrain().DeclaredChain().Refusals.Should().BeEmpty();
+
+    [Test]
+    public void AStatementAfterAChainConvertedToATaskAndAwaited_StillVerifies() =>
+        new ConvertedThenExtractTrain().DeclaredChain().Refusals.Should().BeEmpty();
 
     [Test]
     public void ALinkedChain_StillVerifies() =>
@@ -97,5 +110,36 @@ public class UnlinkedChainTests : TestSetup
     {
         protected override Task<Either<Exception, bool>> Junctions() =>
             Chain<StringToInt>().Chain<IntToBool>().Resolve();
+    }
+
+    private sealed class ConfigureAwaitThenExtractTrain : Train<string, bool>
+    {
+        protected override async Task<Either<Exception, bool>> Junctions()
+        {
+            await Chain<StringToHolder>().ConfigureAwait(false);
+            Extract<Holder, int>();
+            return await Chain<IntToBool>().Resolve();
+        }
+    }
+
+    private sealed class AsTaskThenExtractTrain : Train<string, bool>
+    {
+        protected override async Task<Either<Exception, bool>> Junctions()
+        {
+            await Chain<StringToHolder>().AsTask();
+            Extract<Holder, int>();
+            return await Chain<IntToBool>().Resolve();
+        }
+    }
+
+    private sealed class ConvertedThenExtractTrain : Train<string, bool>
+    {
+        protected override async Task<Either<Exception, bool>> Junctions()
+        {
+            Task<Monad<string, bool>> first = Chain<StringToHolder>();
+            await first;
+            Extract<Holder, int>();
+            return await Chain<IntToBool>().Resolve();
+        }
     }
 }

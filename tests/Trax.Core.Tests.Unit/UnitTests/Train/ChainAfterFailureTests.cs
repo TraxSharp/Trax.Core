@@ -48,10 +48,48 @@ public class ChainAfterFailureTests : TestSetup
             .Be(0, "the chain had already failed, so the ShortCircuit step is skipped");
     }
 
+    [Test]
+    public async Task ChainOfAnInstance_AfterAFailedJunction_DoesNotResolveItsInputFromTheContainer()
+    {
+        var built = new Built();
+        var services = new ServiceCollection()
+            .AddSingleton(built)
+            .AddTransient<IInputService, InputService>()
+            .BuildServiceProvider();
+
+        var result = await new InstanceAfterFailureTrain(services).RunEither("x");
+
+        result.IsLeft.Should().BeTrue();
+        built
+            .Inputs.Should()
+            .Be(0, "the chain had already failed, so the instance step is skipped with its input");
+    }
+
+    [Test]
+    public async Task TypedChainOfAnInstance_AfterAFailedJunction_DoesNotResolveItsInputFromTheContainer()
+    {
+        var built = new Built();
+        var services = new ServiceCollection()
+            .AddSingleton(built)
+            .AddTransient<IInputService, InputService>()
+            .BuildServiceProvider();
+
+        var result = await new TypedInstanceAfterFailureTrain(services).RunEither("x");
+
+        result.IsLeft.Should().BeTrue();
+        built
+            .Inputs.Should()
+            .Be(
+                0,
+                "the chain had already failed, so the typed instance step is skipped with its input"
+            );
+    }
+
     public sealed class Built
     {
         public int Junctions;
         public int Dependencies;
+        public int Inputs;
     }
 
     public sealed class Dependency
@@ -99,5 +137,34 @@ public class ChainAfterFailureTests : TestSetup
 
         protected override Task<Either<Exception, int>> Junctions() =>
             Chain<Fails>().ShortCircuit<ShortCircuitsWithDependency>().Chain<Produces>().Resolve();
+    }
+
+    public interface IInputService;
+
+    public sealed class InputService : IInputService
+    {
+        public InputService(Built built) => built.Inputs++;
+    }
+
+    public sealed class TakesInput : Junction<IInputService, int>
+    {
+        public override Task<int> Run(IInputService input) => Task.FromResult(3);
+    }
+
+    private sealed class InstanceAfterFailureTrain(IServiceProvider services) : Train<string, int>
+    {
+        protected override Monad<string, int> NewMonad() => new(this, services, CancellationToken);
+
+        protected override Task<Either<Exception, int>> Junctions() =>
+            Chain<Fails>().Chain(new TakesInput()).Resolve();
+    }
+
+    private sealed class TypedInstanceAfterFailureTrain(IServiceProvider services)
+        : Train<string, int>
+    {
+        protected override Monad<string, int> NewMonad() => new(this, services, CancellationToken);
+
+        protected override Task<Either<Exception, int>> Junctions() =>
+            Chain<Fails>().Chain<TakesInput, IInputService, int>(new TakesInput()).Resolve();
     }
 }

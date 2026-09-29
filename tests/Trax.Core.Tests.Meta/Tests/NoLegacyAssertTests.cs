@@ -59,4 +59,22 @@ public class NoLegacyAssertTests
                     + string.Join("\n  ", offenders)
             );
     }
+
+    // The patterns themselves, so a copy of this guard that falls behind fails here.
+    [TestCase("Assert.AreEqual(1, x);")]
+    [TestCase("Assert.That(x, Is.EqualTo(1));")]
+    [TestCase("ClassicAssert.AreEqual(1, x);")]
+    [TestCase("CollectionAssert.IsEmpty(items);")]
+    [TestCase("StringAssert.Contains(\"a\", text);")]
+    public void Patterns_FlagEveryClassicAssert(string statement) =>
+        LegacyPatterns
+            .Where(p => p.Pattern.IsMatch(statement))
+            .Should()
+            .NotBeEmpty("a classic NUnit assertion is not FluentAssertions");
+
+    [TestCase("x.Should().Be(1);")]
+    [TestCase("Assert.Ignore(\"not reachable\");")]
+    [TestCase("Assert.Fail(\"unreachable\");")]
+    public void Patterns_LeaveFluentAssertionsAlone(string statement) =>
+        LegacyPatterns.Where(p => p.Pattern.IsMatch(statement)).Should().BeEmpty();
 }
