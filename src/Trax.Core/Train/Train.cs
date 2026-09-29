@@ -74,7 +74,13 @@ public abstract class Train<TInput, TReturn> : IRoute<TInput, TReturn>
     /// Executes the train with Railway-oriented programming support.
     /// </summary>
     /// <param name="input">The input data for the train</param>
-    /// <returns>Either the result of the train or an exception</returns>
+    /// <returns>
+    /// Either the result of the train or an exception. Nothing a junction throws escapes this
+    /// method, cancellation included: a cancelled run returns Left holding the
+    /// <see cref="OperationCanceledException"/>, which a caller tells apart with
+    /// <c>is OperationCanceledException</c>. The token is the one <see cref="Run"/> was given, or
+    /// the one the host set on <see cref="CancellationToken"/>.
+    /// </returns>
     public Task<Either<Exception, TReturn>> RunEither(TInput input) => RunInternal(input);
 
     /// <summary>
@@ -145,6 +151,11 @@ public abstract class Train<TInput, TReturn> : IRoute<TInput, TReturn>
     /// </remarks>
     /// <exception cref="ChainDeclarationException">
     /// The train read per-execution state while declaring its chain.
+    /// </exception>
+    /// <exception cref="Exception">
+    /// Whatever <c>Junctions()</c> throws while it is read, such as the base
+    /// <see cref="NotImplementedException"/> of a train that declares no chain, is thrown from here
+    /// rather than recorded as a refusal.
     /// </exception>
     public ChainRecorder DeclaredChain()
     {
