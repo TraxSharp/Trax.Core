@@ -38,6 +38,17 @@ public class ExtractInstanceMemberTests : TestSetup
         monad.Memory[typeof(Currency)].Should().BeSameAs(bag.Currency);
     }
 
+    [Test]
+    public void Extract_FromAValueTypeNotInMemory_RecordsTheMissingType_InsteadOfThrowing()
+    {
+        var monad = new TestTrain().Activate(new Order { Currency = new Currency("EUR") });
+        var act = () => monad.Extract<DateTime, long>();
+
+        act.Should().NotThrow("a missing source is a Left, as it is for a reference type");
+        monad.Exception.Should().NotBeNull();
+        monad.Exception!.Message.Should().Contain(nameof(DateTime));
+    }
+
     public record Currency(string Code);
 
     public class Order
