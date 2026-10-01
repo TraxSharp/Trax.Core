@@ -25,7 +25,40 @@ public enum ChainStepKind
     /// value, which puts its type into Memory without a junction producing it.
     /// </summary>
     Seed,
+
+    /// <summary>
+    /// Asks a decider a question about a value in Memory and puts the typed decision in Memory.
+    /// The step's junction is the decider, its input the state and its output the decision. A
+    /// <c>Decide</c> asking several questions records one step per question.
+    /// </summary>
+    Decide,
+
+    /// <summary>
+    /// Routes on a choice in Memory to one of several declared tracks, which
+    /// <see cref="ChainRecorder.TracksAt(int)"/> holds.
+    /// </summary>
+    Switch,
+
+    /// <summary>Routes on a yes/no probability in Memory to its Yes, No or Unsure track.</summary>
+    Gate,
+
+    /// <summary>Routes on a score in Memory to the track for the level it reaches.</summary>
+    Scale,
 }
+
+/// <summary>
+/// One track a routing step declares, with the steps it runs recorded on their own.
+/// </summary>
+/// <param name="Name">The track's name: an enum member, <c>Yes</c>, <c>No</c>, <c>Unsure</c> or <c>Otherwise</c>.</param>
+/// <param name="Description">What the track is for, as offered to the decider.</param>
+/// <param name="IsFallback">True for the <c>Otherwise</c> or <c>Unsure</c> track.</param>
+/// <param name="Steps">The track's chain, recorded the way a train's chain is.</param>
+public sealed record ChainTrack(
+    string Name,
+    string? Description,
+    bool IsFallback,
+    ChainRecorder Steps
+);
 
 /// <summary>
 /// One declared step of a train's junction chain, carrying only types. A step is recorded rather than
@@ -56,6 +89,34 @@ public sealed class ChainRecorder
     private readonly List<RecordedRefusal> _recordedRefusals = [];
 
     private readonly System.Collections.Generic.HashSet<int> _builtSteps = [];
+
+    private readonly Dictionary<int, IReadOnlyList<ChainTrack>> _tracks = [];
+
+    private readonly Dictionary<int, List<Type>> _requirements = [];
+
+    /// <summary>
+    /// The tracks of the routing step at <paramref name="stepIndex"/>, or none for any other step.
+    /// </summary>
+    public IReadOnlyList<ChainTrack> TracksAt(int stepIndex) =>
+        _tracks.TryGetValue(stepIndex, out var tracks) ? tracks : [];
+
+    internal void RecordTracks(int stepIndex, IReadOnlyList<ChainTrack> tracks) =>
+        _tracks[stepIndex] = tracks;
+
+    /// <summary>
+    /// Notes a service the step at <paramref name="stepIndex"/> resolves besides its junction, such
+    /// as a shadow decider, so verification can check it is supplied.
+    /// </summary>
+    internal void RecordRequirement(int stepIndex, Type service)
+    {
+        if (!_requirements.TryGetValue(stepIndex, out var services))
+            _requirements[stepIndex] = services = [];
+
+        services.Add(service);
+    }
+
+    internal IReadOnlyList<Type> RequirementsAt(int stepIndex) =>
+        _requirements.TryGetValue(stepIndex, out var services) ? services : [];
 
     /// <summary>The steps declared, in the order the chain declares them.</summary>
     /// <remarks>
@@ -103,6 +164,16 @@ public sealed class ChainRecorder
     /// </summary>
     internal void RefuseStep(ChainStepKind kind, Type? junction, string reason) =>
         Add(new RecordedRefusal(_steps.Count, kind, junction, reason));
+
+    /// <summary>
+    /// Refuses a step already recorded, for a refusal found inside one of a routing step's tracks.
+    /// </summary>
+    internal void RefuseRecordedStep(
+        int stepIndex,
+        ChainStepKind kind,
+        Type? junction,
+        string reason
+    ) => Add(new RecordedRefusal(stepIndex, kind, junction, reason));
 
     private void Add(RecordedRefusal refusal)
     {
