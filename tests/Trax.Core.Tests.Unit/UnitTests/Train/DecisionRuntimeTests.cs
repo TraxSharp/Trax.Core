@@ -1,6 +1,7 @@
 using FluentAssertions;
 using LanguageExt;
 using LanguageExt.UnsafeValueAccess;
+using Microsoft.Extensions.DependencyInjection;
 using Trax.Core.Decisions;
 using Trax.Core.Exceptions;
 using Trax.Core.Junction;
@@ -53,6 +54,85 @@ public class DecisionRuntimeTests : TestSetup
             .Match<ShadowAnswer>(s =>
                 s.Answer == null && !s.Agrees && s.Error!.Contains("did not answer within 0s")
             );
+    }
+
+    [Test]
+    public async Task Shadow_ThatNeverAnswers_DoesNotKeepItsCancellationSourceOnceTheStepGivesUp()
+    {
+        var shadow = new HangingShadow();
+
+        var result = await Run(
+                t =>
+                    t.Decide<string>(q =>
+                            q.Choice<Lane>().Shadow<IShadow>().WaitForShadows(TimeSpan.Zero)
+                        )
+                        .Switch<Lane>(s => Lanes(s, [])),
+                new Services()
+                    .With<IDecider>(new ScriptedDecider().Choose(Lane.Left))
+                    .With<IShadow>(shadow)
+            )
+            .WaitAsync(Hang);
+
+        result.IsRight.Should().BeTrue();
+        var handle = () => shadow.Token.WaitHandle;
+        handle
+            .Should()
+            .Throw<ObjectDisposedException>(
+                "the source linked to the run's token is disposed when the step stops waiting, "
+                    + "not when a shadow that may never return does"
+            );
+    }
+
+    [Test]
+    public async Task Shadow_FromTheContainer_SharesNoScopedServiceWithTheLiveDecider()
+    {
+        var made = new List<NotThreadSafe>();
+        var liveEntered = new TaskCompletionSource();
+        var shadowDone = new TaskCompletionSource();
+        var observer = new RecordingObserver();
+
+        var services = new ServiceCollection();
+        services.AddScoped(_ =>
+        {
+            var resource = new NotThreadSafe();
+            lock (made)
+                made.Add(resource);
+            return resource;
+        });
+        services.AddScoped<IDecider>(p => new HoldingDecider(
+            p.GetRequiredService<NotThreadSafe>(),
+            liveEntered,
+            shadowDone
+        ));
+        services.AddScoped<IShadow>(p => new ConcurrentShadow(
+            p.GetRequiredService<NotThreadSafe>(),
+            liveEntered,
+            shadowDone
+        ));
+        services.AddSingleton<IDecisionObserver>(observer);
+
+        await using var root = services.BuildServiceProvider(validateScopes: true);
+        await using var run = root.CreateAsyncScope();
+
+        var result = await new DecidingTrain(
+            t =>
+                t.Decide<string>(q => q.Choice<Lane>().Shadow<IShadow>())
+                    .Switch<Lane>(s => Lanes(s, [])),
+            run.ServiceProvider
+        )
+            .RunEither("x")
+            .WaitAsync(Hang);
+
+        result.IsRight.Should().BeTrue();
+        observer
+            .Decisions.Single()
+            .Shadows.Single()
+            .Should()
+            .Match<ShadowAnswer>(s => s.Error == null && s.Agrees);
+        made.Should().HaveCount(2, "the shadow gets its own instance of a scoped service");
+        made.Count(r => r.Disposed)
+            .Should()
+            .Be(1, "the shadow's scope is disposed when it ends, the run's when the run's is");
     }
 
     [Test]
@@ -945,6 +1025,84 @@ public class DecisionRuntimeTests : TestSetup
         {
             Token = ct;
             return new TaskCompletionSource<DecisionResult>().Task;
+        }
+    }
+
+    /// <summary>A scoped service that refuses to be used by two callers at once, as a DbContext does.</summary>
+    private sealed class NotThreadSafe : IDisposable
+    {
+        private int _users;
+
+        public bool Disposed { get; private set; }
+
+        public IDisposable Enter()
+        {
+            if (Interlocked.Increment(ref _users) != 1)
+            {
+                Interlocked.Decrement(ref _users);
+                throw new InvalidOperationException("used by two callers at once");
+            }
+
+            return new Leave(this);
+        }
+
+        public void Dispose() => Disposed = true;
+
+        private sealed class Leave(NotThreadSafe owner) : IDisposable
+        {
+            public void Dispose() => Interlocked.Decrement(ref owner._users);
+        }
+    }
+
+    /// <summary>Holds its scoped service until the shadow has tried to use its own.</summary>
+    private sealed class HoldingDecider(
+        NotThreadSafe resource,
+        TaskCompletionSource entered,
+        TaskCompletionSource shadowDone
+    ) : IDecider
+    {
+        public async Task<DecisionResult> Decide(DecisionRequest request, CancellationToken ct)
+        {
+            using (resource.Enter())
+            {
+                entered.TrySetResult();
+                await shadowDone.Task.WaitAsync(Hang, ct);
+            }
+
+            return new DecisionResult(
+                new Dictionary<string, Answer>
+                {
+                    [QuestionKey.For<Lane>()] = new ChoiceAnswer("Left"),
+                }
+            );
+        }
+    }
+
+    /// <summary>Uses its scoped service while the live decider is holding its own.</summary>
+    private sealed class ConcurrentShadow(
+        NotThreadSafe resource,
+        TaskCompletionSource liveEntered,
+        TaskCompletionSource done
+    ) : IShadow
+    {
+        public async Task<DecisionResult> Decide(DecisionRequest request, CancellationToken ct)
+        {
+            try
+            {
+                await liveEntered.Task.WaitAsync(Hang, ct);
+
+                using (resource.Enter())
+                    return new DecisionResult(
+                        new Dictionary<string, Answer>
+                        {
+                            [QuestionKey.For<Lane>()] = new ChoiceAnswer("Left"),
+                        }
+                    );
+            }
+            finally
+            {
+                done.TrySetResult();
+            }
         }
     }
 

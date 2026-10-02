@@ -90,6 +90,14 @@ public sealed class Questions<TState>
     /// and then cancelled and recorded as not having answered. A question whose answer is replayed
     /// is not put to the shadows at all. A shadow that is not registered is a mistake in the host,
     /// so the startup check reports it and the run refuses it, as it does a missing live decider.
+    ///
+    /// <para>A shadow runs alongside the live decider and, if it ignores cancellation, alongside
+    /// the steps after this one. One from the container is built in a scope of its own, disposed
+    /// when it finishes, so it shares no scoped service with the run. It is handed the same state
+    /// object the live decider is, not a copy, so it must treat
+    /// <see cref="DecisionRequest.State"/> as read-only, and must not rely on it staying as it was
+    /// once it has been cancelled. One handed to <c>AddServices</c> is the instance the run holds,
+    /// and is used as it is.</para>
     /// </remarks>
     public Questions<TState> Shadow<TDecider>()
         where TDecider : class, IDecider => AddShadow(typeof(TDecider));

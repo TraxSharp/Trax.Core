@@ -1,3 +1,4 @@
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Trax.Core.Decisions;
 using Trax.Core.Exceptions;
@@ -366,32 +367,40 @@ public partial class Monad<TInput, TReturn>
             // Shadows are resolved here, on the run's own thread, so they never read Memory while
             // the run writes to it. One nobody registered is refused, as the startup check
             // refuses it; one that is registered but fails, is slow or disagrees never changes
-            // the run.
-            var shadowDeciders = new List<(Type Type, IDecider? Decider, string? Error)>();
+            // the run. Each one from the container is built in a scope of its own, so it shares
+            // no scoped service (a DbContext, say) with the live decider or the junctions after
+            // this step, and that scope is disposed when the shadow ends.
+            var shadowDeciders = new List<(Type Type, Shadow? Shadow, string? Error)>();
 
-            foreach (var shadow in questions.Shadows)
+            foreach (var type in questions.Shadows)
             {
-                object? found;
+                Shadow? resolved;
 
                 try
                 {
-                    found = Optional(shadow);
+                    resolved = await ResolveShadow(type).ConfigureAwait(false);
                 }
                 catch (Exception e)
                 {
-                    shadowDeciders.Add((shadow, null, $"could not be resolved: {e.Message}"));
+                    shadowDeciders.Add((type, null, $"could not be resolved: {e.Message}"));
                     continue;
                 }
 
-                if (found is not IDecider resolved)
+                if (resolved is null)
+                {
+                    foreach (var built in shadowDeciders)
+                        if (built.Shadow is { } unused)
+                            await unused.DisposeAsync().ConfigureAwait(false);
+
                     return Refuse(
                         step,
-                        $"{at} needs a shadow decider '{shadow.ReadableName()}' and neither "
+                        $"{at} needs a shadow decider '{type.ReadableName()}' and neither "
                             + "Memory nor the container holds one. Register it, or hand one to "
                             + "AddServices."
                     );
+                }
 
-                shadowDeciders.Add((shadow, resolved, null));
+                shadowDeciders.Add((type, resolved, null));
             }
 
             // Only what the live decider is asked goes to the shadows: a replayed answer is not
@@ -402,26 +411,21 @@ public partial class Monad<TInput, TReturn>
                 pending.Select(s => questionsAsked[s.Key]).ToList()
             );
 
-            var shadowing = CancellationTokenSource.CreateLinkedTokenSource(CancellationToken);
+            // Disposed when this step is done with the shadows, whether they finished or not, so
+            // a shadow that never returns does not keep a registration on the run's token.
+            using var shadowing = CancellationTokenSource.CreateLinkedTokenSource(
+                CancellationToken
+            );
             var shadows = shadowDeciders
                 .Select(s =>
                     (
                         Decider: s.Type,
-                        Asked: s.Decider is null
+                        Asked: s.Shadow is null
                             ? Task.FromResult(new ShadowResult(s.Type, null, s.Error))
-                            : AskShadow(s.Type, s.Decider, request, shadowing.Token)
+                            : AskShadow(s.Type, s.Shadow, request, shadowing.Token)
                     )
                 )
                 .ToList();
-
-            // The source outlives this step only as long as a shadow is still running on it.
-            _ = Task.WhenAll(shadows.Select(s => s.Asked))
-                .ContinueWith(
-                    _ => shadowing.Dispose(),
-                    CancellationToken.None,
-                    TaskContinuationOptions.ExecuteSynchronously,
-                    TaskScheduler.Default
-                );
 
             try
             {
@@ -530,12 +534,60 @@ public partial class Monad<TInput, TReturn>
     );
 
     /// <summary>
+    /// A shadow decider, and the scope it was built in when it came from the container.
+    /// </summary>
+    private sealed record Shadow(IDecider Decider, AsyncServiceScope? Scope) : IAsyncDisposable
+    {
+        public async ValueTask DisposeAsync()
+        {
+            if (Scope is { } scope)
+                await scope.DisposeAsync().ConfigureAwait(false);
+        }
+    }
+
+    /// <summary>
+    /// The shadow decider <paramref name="type"/>, or null when nothing supplies one. One handed to
+    /// AddServices is used as it is. One from the container is built in a new scope when the
+    /// container can make one, so the run's scoped services are never shared with it.
+    /// </summary>
+    private async Task<Shadow?> ResolveShadow(Type type)
+    {
+        if (Memory.GetValueOrDefault(type) is { } held)
+            return held is IDecider given ? new Shadow(given, null) : null;
+
+        if (Memory.GetValueOrDefault(typeof(IServiceProvider)) is not IServiceProvider container)
+            return null;
+
+        if (container.GetService(typeof(IServiceScopeFactory)) is not IServiceScopeFactory scopes)
+            return container.GetService(type) is IDecider unscoped
+                ? new Shadow(unscoped, null)
+                : null;
+
+        var scope = scopes.CreateAsyncScope();
+
+        try
+        {
+            if (scope.ServiceProvider.GetService(type) is IDecider scoped)
+                return new Shadow(scoped, scope);
+        }
+        catch
+        {
+            await scope.DisposeAsync().ConfigureAwait(false);
+            throw;
+        }
+
+        await scope.DisposeAsync().ConfigureAwait(false);
+        return null;
+    }
+
+    /// <summary>
     /// Asks a shadow decider on a thread of its own, turning every way it can fail into a result,
     /// so the run never depends on it, not even on a shadow that blocks before it returns a task.
+    /// The shadow's scope is disposed when it ends; a shadow that never ends keeps it.
     /// </summary>
     private static Task<ShadowResult> AskShadow(
         Type deciderType,
-        IDecider shadow,
+        Shadow shadow,
         DecisionRequest request,
         CancellationToken cancellationToken
     ) =>
@@ -545,13 +597,25 @@ public partial class Monad<TInput, TReturn>
                 try
                 {
                     var result = await shadow
-                        .Decide(request, cancellationToken)
+                        .Decider.Decide(request, cancellationToken)
                         .ConfigureAwait(false);
                     return new ShadowResult(deciderType, result?.Answers, null);
                 }
                 catch (Exception e)
                 {
                     return new ShadowResult(deciderType, null, $"failed: {e.Message}");
+                }
+                finally
+                {
+                    try
+                    {
+                        await shadow.DisposeAsync().ConfigureAwait(false);
+                    }
+                    catch
+                    {
+                        // A shadow's scope failing to dispose is the shadow's problem, not the
+                        // run's, which may already have moved on.
+                    }
                 }
             },
             CancellationToken.None
@@ -606,10 +670,6 @@ public partial class Monad<TInput, TReturn>
         try
         {
             shadowing.Cancel();
-        }
-        catch (ObjectDisposedException)
-        {
-            // Every shadow already finished, and the source went with them.
         }
         catch (AggregateException)
         {

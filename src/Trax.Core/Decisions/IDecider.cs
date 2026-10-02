@@ -32,7 +32,11 @@ public interface IDecider
 /// The questions a train asks about one state.
 /// </summary>
 /// <param name="Train">The name of the train asking, for logging.</param>
-/// <param name="State">The value the questions are about.</param>
+/// <param name="State">
+/// The value the questions are about: the instance in the run's Memory, not a copy. A decider
+/// reads it and never changes it, a shadow above all, since a shadow may still be running while
+/// the steps after the decision do.
+/// </param>
 /// <param name="Questions">The questions, each with a key unique within the request.</param>
 public sealed record DecisionRequest(string Train, object State, IReadOnlyList<Question> Questions);
 
