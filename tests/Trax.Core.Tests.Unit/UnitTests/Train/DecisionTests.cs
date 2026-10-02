@@ -281,7 +281,7 @@ public class DecisionTests : TestSetup
     #region Answers the run will not act on
 
     [TestCaseSource(nameof(UnfitAnswers))]
-    public async Task Run_AnAnswerThatDoesNotFit_FailsTheRunPermanently(
+    public async Task Run_AnAnswerThatDoesNotFit_FailsTheRunTransiently(
         Answer answer,
         string reason
     )
@@ -303,7 +303,7 @@ public class DecisionTests : TestSetup
         failure.Message.Should().Contain(reason);
         ((TrainExceptionData)failure.Data["TrainExceptionData"]!)
             .FailureClass.Should()
-            .Be(FailureClass.Permanent);
+            .Be(FailureClass.Transient, "a model asked again may well answer properly");
     }
 
     private static IEnumerable<TestCaseData> UnfitAnswers()
@@ -333,8 +333,9 @@ public class DecisionTests : TestSetup
     }
 
     [Test]
-    public async Task Run_AQuestionLeftUnanswered_FailsTheRun() =>
-        Failure(
+    public async Task Run_AQuestionLeftUnanswered_FailsTheRunTransiently()
+    {
+        var failure = Failure(
             await Train(
                     t =>
                         t.Switch<string, Lane>(s =>
@@ -343,9 +344,29 @@ public class DecisionTests : TestSetup
                     new ScriptedDecider()
                 )
                 .RunEither("x")
+        );
+
+        failure.Message.Should().Contain($"gave no answer to '{QuestionKey.For<Lane>()}'");
+        ((TrainExceptionData)failure.Data["TrainExceptionData"]!)
+            .FailureClass.Should()
+            .Be(FailureClass.Transient, "a model that dropped a question may answer it next time");
+    }
+
+    [Test]
+    public async Task Run_ADeclarationThatCannotWork_StaysPermanent() =>
+        (
+            (TrainExceptionData)
+                Failure(
+                    await Train(t =>
+                            t.Switch<string, Lane>(s =>
+                                s.When(Lane.Left, l => l).When(Lane.Left, l => l)
+                            )
+                        )
+                        .RunEither("x")
+                ).Data["TrainExceptionData"]!
         )
-            .Message.Should()
-            .Contain($"gave no answer to '{QuestionKey.For<Lane>()}'");
+            .FailureClass.Should()
+            .Be(FailureClass.Permanent);
 
     [TestCase(-0.5)]
     [TestCase(2.01)]

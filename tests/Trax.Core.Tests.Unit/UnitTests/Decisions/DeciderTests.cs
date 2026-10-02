@@ -87,6 +87,57 @@ public class DeciderTests : TestSetup
         result.Answers[FlagQuestion.Key].Should().Be(new YesNoAnswer(0.05));
     }
 
+    [TestCaseSource(nameof(UnfitFirstAnswers))]
+    public async Task Cascade_AnAnswerThatDoesNotFitTheQuestion_IsEscalated(
+        Question question,
+        Answer unfit
+    )
+    {
+        var then = new ScriptedDecider().Choose(Lane.Right).YesNo<Flag>(0.05).Score<Temperature>(1);
+        var cascade = new CascadingDecider(
+            new ScriptedDecider().Answer(question.Key, _ => unfit),
+            then
+        );
+
+        var result = await cascade.Decide(Request(question), default);
+
+        then.Requests.Should().ContainSingle("an answer the run would refuse is not a sure one");
+        result.Answers[question.Key].Should().NotBe(unfit);
+    }
+
+    private static readonly ScoreQuestion WarmthQuestion = new(
+        QuestionKey.For<Temperature>(),
+        "How warm?",
+        [
+            new Criterion("Freezing", null),
+            new Criterion("Cold", null),
+            new Criterion("Mild", null),
+            new Criterion("Hot", null),
+        ]
+    );
+
+    private static IEnumerable<TestCaseData> UnfitFirstAnswers()
+    {
+        TestCaseData Case(string name, Question question, Answer answer) =>
+            new TestCaseData(question, answer).SetName($"Cascade_Escalates_{name}");
+
+        yield return Case("AnOptionItWasNotOffered", LaneQuestion, new ChoiceAnswer("Banana"));
+        yield return Case("AConfidenceAboveOne", LaneQuestion, new ChoiceAnswer("Left", 1.5));
+        yield return Case(
+            "AProbabilityOutsideZeroToOne",
+            LaneQuestion,
+            new ChoiceAnswer("Left", 1, new Dictionary<string, double> { ["Left"] = 2 })
+        );
+        yield return Case("AnotherKindOfAnswer", LaneQuestion, new YesNoAnswer(0.99));
+        yield return Case("AYesNoAboveOne", FlagQuestion, new YesNoAnswer(1.5));
+        yield return Case("AScoreOffTheLevels", WarmthQuestion, new ScoreAnswer(4));
+        yield return Case(
+            "TooFewLevelProbabilities",
+            WarmthQuestion,
+            new ScoreAnswer(1, 1, [0.1, 0.9])
+        );
+    }
+
     [TestCase(1.5, 0.2, 0.8, "escalateBelow")]
     [TestCase(double.NaN, 0.2, 0.8, "escalateBelow")]
     [TestCase(0.8, -0.1, 0.8, "unsureAbove")]

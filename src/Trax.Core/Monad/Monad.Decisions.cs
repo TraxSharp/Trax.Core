@@ -24,8 +24,9 @@ public partial class Monad<TInput, TReturn>
     /// </summary>
     /// <remarks>
     /// An answer that does not fit its question (an option that does not exist, a probability
-    /// outside 0 to 1, a score off the scale) fails the run rather than being acted on, as does a
-    /// decider that throws. A later <see cref="Switch{TTrack}"/>, <see cref="Gate{TQuestion}"/> or
+    /// outside 0 to 1, a score off the scale), or no answer at all, fails the run rather than being
+    /// acted on, classified <see cref="FailureClass.Transient"/> because asking again may get a
+    /// usable one; so does a decider that throws, classified as its exception says. A later <see cref="Switch{TTrack}"/>, <see cref="Gate{TQuestion}"/> or
     /// <see cref="Scale{TLevel}"/> routes on the decisions without asking again. An answer replayed
     /// from an earlier run (<see cref="IDecisionReplay"/>) that no longer fits is not acted on
     /// either; the decider is asked afresh instead. A cancelled run asks nothing.
@@ -425,10 +426,13 @@ public partial class Monad<TInput, TReturn>
 
         foreach (var spec in specs)
         {
+            // A decider that skips a question or garbles an answer is a model having a bad call,
+            // not a declaration that cannot work, so asking again may well get a usable answer.
             if (!answers.TryGetValue(spec.Key, out var answer))
                 return Refuse(
                     step,
-                    $"{at}: the decider gave no answer to '{spec.Key}', so there is nothing to act on."
+                    $"{at}: the decider gave no answer to '{spec.Key}', so there is nothing to act on.",
+                    FailureClass.Transient
                 );
 
             try
@@ -438,7 +442,11 @@ public partial class Monad<TInput, TReturn>
             catch (InvalidAnswerException invalid)
             {
                 // A replayed answer was checked before it was kept, so this one is the decider's.
-                return Refuse(step, $"{at}: the decider {invalid.Message}, so it is not acted on.");
+                return Refuse(
+                    step,
+                    $"{at}: the decider {invalid.Message}, so it is not acted on.",
+                    FailureClass.Transient
+                );
             }
         }
 
@@ -957,13 +965,19 @@ public partial class Monad<TInput, TReturn>
         );
 
     /// <summary>
-    /// Fails the run for a decision Trax will not act on. Asking again would get the same answer
-    /// from the same declaration, so the failure is classified permanent.
+    /// Fails the run for a decision Trax will not act on. By default the failure is classified
+    /// permanent: a declaration that cannot work, or a decision with no track to take, gets the
+    /// same refusal however often it is run. A decider's missing or unfit answer passes
+    /// <see cref="FailureClass.Transient"/>, because asking again may get a usable one.
     /// </summary>
-    private Monad<TInput, TReturn> Refuse(string step, string reason)
+    private Monad<TInput, TReturn> Refuse(
+        string step,
+        string reason,
+        FailureClass failure = FailureClass.Permanent
+    )
     {
         var refusal = new TrainException(reason);
-        refusal.Data["TrainExceptionData"] = ExceptionData(refusal, step, FailureClass.Permanent);
+        refusal.Data["TrainExceptionData"] = ExceptionData(refusal, step, failure);
         Exception ??= refusal;
         return this;
     }

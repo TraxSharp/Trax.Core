@@ -11,8 +11,11 @@ namespace Trax.Core.Decisions;
 /// settles most questions in a fraction of the time and cost, and the larger one reasons about the
 /// rest. A question is escalated when its choice or score confidence is below
 /// <c>escalateBelow</c> (or is not a number), when its probability of yes falls strictly between
-/// <c>unsureAbove</c> and <c>unsureBelow</c> (or is not a number), or when the first decider did
-/// not answer it.
+/// <c>unsureAbove</c> and <c>unsureBelow</c> (or is not a number), when the first decider did
+/// not answer it, or when its answer does not fit the question: an option it was not offered, a
+/// score off the levels, a probability or confidence outside 0 to 1, or another kind of answer.
+/// A model that drops a question or garbles one is the first tier failing at it, which is what
+/// the second tier is for.
 ///
 /// <para>If the first decider fails, every question is escalated: the first tier being down is
 /// what the second one is for. Cancellation is the exception, and passes straight through. The
@@ -102,7 +105,9 @@ public sealed class CascadingDecider : IDecider
         }
 
         var unsure = request
-            .Questions.Where(q => !answers.TryGetValue(q.Key, out var a) || IsUnsure(a))
+            .Questions.Where(q =>
+                !answers.TryGetValue(q.Key, out var a) || !Fits(q, a) || IsUnsure(a)
+            )
             .ToList();
 
         if (unsure.Count == 0)
@@ -130,6 +135,33 @@ public sealed class CascadingDecider : IDecider
             YesNoAnswer y => !(y.Probability <= _unsureAbove || y.Probability >= _unsureBelow),
             _ => true,
         };
+
+    /// <summary>
+    /// Whether <paramref name="answer"/> is the kind <paramref name="question"/> asks for and is
+    /// within what it offered, so the run would act on it rather than refuse it.
+    /// </summary>
+    private static bool Fits(Question question, Answer answer) =>
+        (question, answer) switch
+        {
+            (ChoiceQuestion q, ChoiceAnswer a) => q.Options.Any(o => o.Name == a.Choice)
+                && IsProbability(a.Confidence)
+                && (a.Probabilities?.Values.All(IsProbability) ?? true),
+            (ScoreQuestion q, ScoreAnswer a) => a.Score >= 0
+                && a.Score <= q.Levels.Count - 1
+                && IsProbability(a.Confidence)
+                && (
+                    a.Probabilities is null
+                    || (
+                        a.Probabilities.Count == q.Levels.Count
+                        && a.Probabilities.All(IsProbability)
+                    )
+                ),
+            (YesNoQuestion, YesNoAnswer a) => IsProbability(a.Probability),
+            _ => false,
+        };
+
+    // Written so that NaN, which compares false with everything, is not a probability.
+    private static bool IsProbability(double value) => value is >= 0 and <= 1;
 
     private static void CheckProbability(double value, string name)
     {
