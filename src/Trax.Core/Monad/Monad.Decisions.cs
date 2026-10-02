@@ -22,6 +22,12 @@ public partial class Monad<TInput, TReturn>
     /// </summary>
     private readonly Dictionary<string, Type> _askedAbout = [];
 
+    /// <summary>
+    /// How long a shadow that has been cancelled is given to finish before its scope is disposed
+    /// under it. The run never waits for this.
+    /// </summary>
+    private static readonly TimeSpan ShadowGrace = TimeSpan.FromSeconds(1);
+
     #region Public API
 
     /// <summary>
@@ -425,6 +431,23 @@ public partial class Monad<TInput, TReturn>
                 pending.Select(s => questionsAsked[s.Key]).ToList()
             );
 
+            // Written once, here, before the live decider or any step after this one can change
+            // the state, and read back separately for each shadow on its own thread, so no shadow
+            // shares an object with the run or with another shadow. A state that cannot be
+            // written is every shadow's problem, never the run's.
+            byte[]? snapshot = null;
+            string? uncopied = null;
+
+            if (shadowDeciders.Any(s => s.Shadow is not null))
+                try
+                {
+                    snapshot = StateCopy.Snapshot(state!);
+                }
+                catch (Exception e)
+                {
+                    uncopied = Uncopied(e);
+                }
+
             // Disposed when this step is done with the shadows, whether they finished or not, so
             // a shadow that never returns does not keep a registration on the run's token.
             using var shadowing = CancellationTokenSource.CreateLinkedTokenSource(
@@ -436,7 +459,15 @@ public partial class Monad<TInput, TReturn>
                         Decider: s.Type,
                         Asked: s.Shadow is null
                             ? Task.FromResult(new ShadowResult(s.Type, null, s.Error))
-                            : AskShadow(s.Type, s.Shadow, request, shadowing.Token)
+                        : snapshot is null ? Unasked(s.Type, s.Shadow, uncopied!)
+                        : AskShadow(
+                            s.Type,
+                            s.Shadow,
+                            request,
+                            snapshot,
+                            state!.GetType(),
+                            shadowing.Token
+                        )
                     )
                 )
                 .ToList();
@@ -593,14 +624,38 @@ public partial class Monad<TInput, TReturn>
     );
 
     /// <summary>
-    /// A shadow decider, and the scope it was built in when it came from the container.
+    /// A shadow decider, and the scope it was built in when it came from the container. The scope
+    /// is disposed once, by whichever comes first: the shadow ending, or the grace period after it
+    /// was cancelled running out.
     /// </summary>
-    private sealed record Shadow(IDecider Decider, AsyncServiceScope? Scope) : IAsyncDisposable
+    private sealed class Shadow(IDecider decider, AsyncServiceScope? scope) : IAsyncDisposable
     {
+        private int _disposed;
+
+        public IDecider Decider { get; } = decider;
+
         public async ValueTask DisposeAsync()
         {
-            if (Scope is { } scope)
-                await scope.DisposeAsync().ConfigureAwait(false);
+            if (scope is { } built && Interlocked.Exchange(ref _disposed, 1) == 0)
+                await built.DisposeAsync().ConfigureAwait(false);
+        }
+
+        /// <summary>
+        /// Disposes the scope once <paramref name="grace"/> has passed, on a timer of its own, so
+        /// a shadow that ignores cancellation and never returns does not keep its scope, and the
+        /// caller does not wait for either.
+        /// </summary>
+        public async Task DisposeAfter(TimeSpan grace)
+        {
+            try
+            {
+                await Task.Delay(grace).ConfigureAwait(false);
+                await DisposeAsync().ConfigureAwait(false);
+            }
+            catch
+            {
+                // A shadow's scope failing to dispose is the shadow's problem, not the run's.
+            }
         }
     }
 
@@ -639,33 +694,77 @@ public partial class Monad<TInput, TReturn>
         return null;
     }
 
+    private static string Uncopied(Exception e) =>
+        $"was not asked, because its own copy of the state could not be made through JSON: {e.Message}";
+
+    /// <summary>
+    /// A shadow that cannot be asked, because the state could not be written for it, recorded as
+    /// not having answered. Its scope is released at once.
+    /// </summary>
+    private static async Task<ShadowResult> Unasked(Type deciderType, Shadow shadow, string why)
+    {
+        try
+        {
+            await shadow.DisposeAsync().ConfigureAwait(false);
+        }
+        catch
+        {
+            // The shadow's problem, not the run's.
+        }
+
+        return new ShadowResult(deciderType, null, why);
+    }
+
     /// <summary>
     /// Asks a shadow decider on a thread of its own, turning every way it can fail into a result,
     /// so the run never depends on it, not even on a shadow that blocks before it returns a task.
-    /// The shadow's scope is disposed when it ends; a shadow that never ends keeps it.
+    /// The shadow is handed a copy of the state of its own, read back from
+    /// <paramref name="snapshot"/>. Its scope is disposed when it ends, or, for one that is still
+    /// running once it has been cancelled, after <see cref="ShadowGrace"/>.
     /// </summary>
     private static Task<ShadowResult> AskShadow(
         Type deciderType,
         Shadow shadow,
         DecisionRequest request,
+        byte[] snapshot,
+        Type stateType,
         CancellationToken cancellationToken
     ) =>
         Task.Run(
             async () =>
             {
+                // Registered before anything else, so a shadow cancelled before its thread ran
+                // still has its scope released. The callback only starts a timer.
+                var grace = cancellationToken.Register(() => _ = shadow.DisposeAfter(ShadowGrace));
+
                 try
                 {
+                    object copy;
+
+                    try
+                    {
+                        copy = StateCopy.Read(snapshot, stateType);
+                    }
+                    catch (Exception e)
+                    {
+                        return new ShadowResult(deciderType, null, Uncopied(e));
+                    }
+
                     var result = await shadow
-                        .Decider.Decide(request, cancellationToken)
+                        .Decider.Decide(request with { State = copy }, cancellationToken)
                         .ConfigureAwait(false);
                     return new ShadowResult(deciderType, result?.Answers, null);
                 }
                 catch (Exception e)
                 {
+                    // Including an ObjectDisposedException from a scope disposed under a shadow
+                    // that outlived its grace period: by then nothing reads this result.
                     return new ShadowResult(deciderType, null, $"failed: {e.Message}");
                 }
                 finally
                 {
+                    await grace.DisposeAsync().ConfigureAwait(false);
+
                     try
                     {
                         await shadow.DisposeAsync().ConfigureAwait(false);

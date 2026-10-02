@@ -41,7 +41,20 @@ public sealed class Questions<TState>
     internal IEnumerable<string> Problems =>
         _problems
             .Concat(_specs.Select(s => s.Problem).OfType<string>())
-            .Concat(_specs.Count == 0 ? ["asks no questions. Add one."] : []);
+            .Concat(_specs.Count == 0 ? ["asks no questions. Add one."] : [])
+            .Concat(UncopyableState());
+
+    /// <summary>
+    /// A state the shadows cannot each be handed a copy of, when its type alone says so.
+    /// </summary>
+    private IEnumerable<string> UncopyableState()
+    {
+        if (_shadows.Count > 0 && StateCopy.ProblemWith(typeof(TState)) is { } problem)
+            yield return $"shadows its decisions, and each shadow is handed its own copy of the "
+                + $"'{typeof(TState).ReadableName()}' it decides from, written to JSON and read "
+                + $"back, but {problem}. Decide from a type JSON can write and read back, or drop "
+                + "the shadows.";
+    }
 
     /// <summary>Asks which member of <typeparamref name="TTrack"/> applies.</summary>
     /// <param name="asking">The question. Defaults to the <see cref="AsksAttribute"/> on <typeparamref name="TTrack"/>.</param>
@@ -92,12 +105,17 @@ public sealed class Questions<TState>
     /// so the startup check reports it and the run refuses it, as it does a missing live decider.
     ///
     /// <para>A shadow runs alongside the live decider and, if it ignores cancellation, alongside
-    /// the steps after this one. One from the container is built in a scope of its own, disposed
-    /// when it finishes, so it shares no scoped service with the run. It is handed the same state
-    /// object the live decider is, not a copy, so it must treat
-    /// <see cref="DecisionRequest.State"/> as read-only, and must not rely on it staying as it was
-    /// once it has been cancelled. One handed to <c>AddServices</c> is the instance the run holds,
-    /// and is used as it is.</para>
+    /// the steps after this one, so it shares nothing with the run. Each shadow is handed a copy of
+    /// the state of its own: the state is written to JSON once, when the question is asked, and
+    /// read back separately for each shadow, so a shadow may change its
+    /// <see cref="DecisionRequest.State"/> without the run or another shadow seeing it. A state
+    /// type that JSON cannot write and read back is refused by the startup check when that can be
+    /// told from the type; otherwise a shadow whose copy cannot be made is recorded as not having
+    /// answered, and the run goes on. One from the container is built in a scope of its own,
+    /// disposed when it finishes; one that has not finished a second after it was cancelled has
+    /// its scope disposed under it, and whatever it then fails with is recorded as its own
+    /// failure. One handed to <c>AddServices</c> is the instance the run holds, and is used as it
+    /// is.</para>
     /// </remarks>
     public Questions<TState> Shadow<TDecider>()
         where TDecider : class, IDecider => AddShadow(typeof(TDecider));

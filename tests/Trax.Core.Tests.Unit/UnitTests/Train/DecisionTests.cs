@@ -221,10 +221,70 @@ public class DecisionTests : TestSetup
             "routes on 'OneLevel', which has fewer than two levels"
         );
         yield return Case(
+            "AShadowedStateJsonCannotReadBack",
+            t =>
+                t.Chain<StringToHolder>()
+                    .Decide<Holder>(q => q.Choice<Lane>().Shadow<IShadow>())
+                    .Chain<StringToBool>(),
+            "its member 'Inner' is declared as 'IInner', an interface, which JSON cannot read back"
+        );
+        yield return Case(
+            "AShadowedStateJsonCannotWrite",
+            t =>
+                t.Chain<StringToCallback>()
+                    .Decide<Callback>(q => q.Choice<Lane>().Shadow<IShadow>())
+                    .Chain<StringToBool>(),
+            "its member 'Notify' is a 'Action', which JSON cannot write"
+        );
+        yield return Case(
             "ATrackNamingSomethingNotAJunction",
             t => t.Switch<string, Lane>(s => s.When(Lane.Left, l => l.Chain<NotAJunction>())),
             "track 'Left': Chain names NotAJunction"
         );
+    }
+
+    [Test]
+    public void DeclaredChain_AStateJsonCannotReadBack_IsNoProblemWithoutShadows() =>
+        Verify(
+                Train(t =>
+                    t.Chain<StringToHolder>()
+                        .Decide<Holder>(q => q.Choice<Lane>())
+                        .Chain<StringToBool>()
+                )
+            )
+            .Should()
+            .NotContain(f => f.Reason.Contains("JSON"));
+
+    [Test]
+    public void DeclaredChain_AShadowedStateJsonCanCopy_IsNoProblem() =>
+        Verify(
+                Train(t =>
+                    t.Chain<StringToParcel>()
+                        .Decide<Parcel>(q => q.Choice<Lane>().Shadow<IShadow>())
+                        .Chain<StringToBool>()
+                )
+            )
+            .Should()
+            .NotContain(f => f.Reason.Contains("JSON"));
+
+    [Test]
+    public async Task Run_AShadowedStateJsonCannotReadBack_IsRefusedBeforeTheDeciderIsAsked()
+    {
+        var decider = new ScriptedDecider().Choose(Lane.Left);
+
+        var failure = Failure(
+            await Train(
+                    t =>
+                        t.Chain<StringToHolder>()
+                            .Decide<Holder>(q => q.Choice<Lane>().Shadow<IShadow>())
+                            .Chain<StringToBool>(),
+                    decider
+                )
+                .RunEither("x")
+        );
+
+        failure.Message.Should().Contain("cannot read back");
+        decider.Requests.Should().BeEmpty();
     }
 
     [Test]
@@ -636,6 +696,41 @@ public class DecisionTests : TestSetup
     }
 
     private class NotAJunction;
+
+    public interface IInner;
+
+    /// <summary>A state JSON writes but cannot read back: a member is declared as an interface.</summary>
+    public sealed class Holder
+    {
+        public string Name { get; set; } = "";
+
+        public IInner? Inner { get; set; }
+    }
+
+    /// <summary>A state JSON cannot write: a member is a delegate.</summary>
+    public sealed class Callback
+    {
+        public Action? Notify { get; set; }
+    }
+
+    /// <summary>A state JSON copies: a record read back through its constructor, with a list.</summary>
+    public sealed record Parcel(string Id, decimal Weight, IReadOnlyList<string> Tags);
+
+    private class StringToHolder : Junction<string, Holder>
+    {
+        public override Task<Holder> Run(string input) => Task.FromResult(new Holder());
+    }
+
+    private class StringToCallback : Junction<string, Callback>
+    {
+        public override Task<Callback> Run(string input) => Task.FromResult(new Callback());
+    }
+
+    private class StringToParcel : Junction<string, Parcel>
+    {
+        public override Task<Parcel> Run(string input) =>
+            Task.FromResult(new Parcel(input, 1m, ["fragile"]));
+    }
 
     #endregion
 }

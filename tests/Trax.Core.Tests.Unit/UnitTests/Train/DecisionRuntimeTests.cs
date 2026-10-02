@@ -136,6 +136,140 @@ public class DecisionRuntimeTests : TestSetup
     }
 
     [Test]
+    public async Task Shadow_IsHandedACopyOfTheStateOfItsOwn()
+    {
+        var basket = new Basket { Name = "original" };
+        basket.Items.Add("apple");
+        var live = new SeeingDecider();
+        var first = new MutatingShadow("first");
+        var second = new MutatingShadow("second");
+        var observer = new RecordingObserver();
+
+        var result = await Run(
+                t =>
+                    t.Chain(new MakeBasket(basket))
+                        .Decide<Basket>(q =>
+                            q.Choice<Lane>().Shadow<IShadow>().Shadow<IOtherShadow>()
+                        )
+                        .Switch<Lane>(s => Lanes(s, [])),
+                new Services()
+                    .With<IDecider>(live)
+                    .With<IShadow>(first)
+                    .With<IOtherShadow>(second)
+                    .With<IDecisionObserver>(observer)
+            )
+            .WaitAsync(Hang);
+
+        result.IsRight.Should().BeTrue();
+        live.Seen.Should().BeSameAs(basket, "the live decider is handed the run's own state");
+        first.Seen.Should().NotBeSameAs(basket).And.NotBeSameAs(second.Seen);
+        second.Seen.Should().NotBeSameAs(basket);
+        first.Saw.Should().Be("original: apple", "the copy carries the state, list included");
+        second.Saw.Should().Be("original: apple", "the other shadow's changes are not in it");
+        basket.Name.Should().Be("original", "a shadow's changes never reach the run");
+        basket.Items.Should().Equal("apple");
+        observer.Decisions.Single().Shadows.Should().OnlyContain(s => s.Error == null && s.Agrees);
+    }
+
+    [Test]
+    public async Task Shadow_WhoseStateCannotBeWrittenAsJson_IsRecordedAsNotAnsweringAndTheRunGoesOn()
+    {
+        var shadow = new ScriptedShadow(new ScriptedDecider().Choose(Lane.Left));
+        var observer = new RecordingObserver();
+
+        var result = await Run(
+                t =>
+                    t.Chain(new MakeParcel(new CallbackParcel()))
+                        .Decide<IParcel>(q => q.Choice<Lane>().Shadow<IShadow>())
+                        .Switch<Lane>(s => Lanes(s, [])),
+                new Services()
+                    .With<IDecider>(new ScriptedDecider().Choose(Lane.Left))
+                    .With<IShadow>(shadow)
+                    .With<IDecisionObserver>(observer)
+            )
+            .WaitAsync(Hang);
+
+        result.IsRight.Should().BeTrue();
+        shadow.Inner.Requests.Should().BeEmpty("a shadow with no copy of its own is not asked");
+        observer
+            .Decisions.Single()
+            .Shadows.Single()
+            .Should()
+            .Match<ShadowAnswer>(s =>
+                s.Answer == null && !s.Agrees && s.Error!.Contains("could not be made through JSON")
+            );
+    }
+
+    [Test]
+    public async Task Shadow_WhoseStateCannotBeReadBack_IsRecordedAsNotAnsweringAndTheRunGoesOn()
+    {
+        var shadow = new ScriptedShadow(new ScriptedDecider().Choose(Lane.Left));
+        var observer = new RecordingObserver();
+
+        var result = await Run(
+                t =>
+                    t.Chain(
+                            new MakeParcel(
+                                new WrappingParcel { Inner = new WrappingParcel.Plain() }
+                            )
+                        )
+                        .Decide<IParcel>(q => q.Choice<Lane>().Shadow<IShadow>())
+                        .Switch<Lane>(s => Lanes(s, [])),
+                new Services()
+                    .With<IDecider>(new ScriptedDecider().Choose(Lane.Left))
+                    .With<IShadow>(shadow)
+                    .With<IDecisionObserver>(observer)
+            )
+            .WaitAsync(Hang);
+
+        result.IsRight.Should().BeTrue();
+        shadow.Inner.Requests.Should().BeEmpty();
+        observer
+            .Decisions.Single()
+            .Shadows.Single()
+            .Error.Should()
+            .Contain("could not be made through JSON");
+    }
+
+    [Test]
+    public async Task Shadow_ThatIgnoresCancellationAndNeverReturns_HasItsScopeDisposedSoonAfter()
+    {
+        var made = new TaskCompletionSource<Tracked>(
+            TaskCreationOptions.RunContinuationsAsynchronously
+        );
+        var services = new ServiceCollection();
+        services.AddScoped(_ =>
+        {
+            var tracked = new Tracked();
+            made.TrySetResult(tracked);
+            return tracked;
+        });
+        services.AddScoped<IShadow>(p => new HangingWith(p.GetRequiredService<Tracked>()));
+        services.AddSingleton<IDecider>(new ScriptedDecider().Choose(Lane.Left));
+
+        await using var root = services.BuildServiceProvider(validateScopes: true);
+        await using var run = root.CreateAsyncScope();
+
+        var result = await new DecidingTrain(
+            t =>
+                t.Decide<string>(q =>
+                        q.Choice<Lane>().Shadow<IShadow>().WaitForShadows(TimeSpan.Zero)
+                    )
+                    .Switch<Lane>(s => Lanes(s, [])),
+            run.ServiceProvider
+        )
+            .RunEither("x")
+            .WaitAsync(Hang);
+
+        result.IsRight.Should().BeTrue();
+        var tracked = await made.Task.WaitAsync(Hang);
+        var disposed = () => tracked.Disposed.Task.WaitAsync(Hang);
+        await disposed
+            .Should()
+            .NotThrowAsync("a shadow that never returns does not keep its scope for ever");
+    }
+
+    [Test]
     public async Task Shadow_ThatNeverAnswers_DoesNotHoldUpALiveDeciderThatFails()
     {
         var result = await Run(
@@ -1172,6 +1306,104 @@ public class DecisionRuntimeTests : TestSetup
         : Microsoft.Extensions.DependencyInjection.IServiceProviderIsService
     {
         public bool IsService(Type serviceType) => types.Contains(serviceType);
+    }
+
+    public interface IOtherShadow : IDecider;
+
+    public sealed class Basket
+    {
+        public string Name { get; set; } = "";
+
+        public List<string> Items { get; } = [];
+    }
+
+    public interface IParcel;
+
+    /// <summary>A state JSON cannot write: it holds a delegate.</summary>
+    public sealed class CallbackParcel : IParcel
+    {
+        public Action Notify { get; set; } = () => { };
+    }
+
+    /// <summary>A state JSON writes but cannot read back: it holds a member declared as an interface.</summary>
+    public sealed class WrappingParcel : IParcel
+    {
+        public IParcel? Inner { get; set; }
+
+        public sealed class Plain : IParcel;
+    }
+
+    private sealed class MakeBasket(Basket basket) : Junction<string, Basket>
+    {
+        public override Task<Basket> Run(string input) => Task.FromResult(basket);
+    }
+
+    private sealed class MakeParcel(IParcel parcel) : Junction<string, IParcel>
+    {
+        public override Task<IParcel> Run(string input) => Task.FromResult(parcel);
+    }
+
+    /// <summary>Notes the state it was handed, and chooses Left.</summary>
+    private sealed class SeeingDecider : IDecider
+    {
+        public object? Seen { get; private set; }
+
+        public Task<DecisionResult> Decide(DecisionRequest request, CancellationToken ct)
+        {
+            Seen = request.State;
+            return Left();
+        }
+
+        public static Task<DecisionResult> Left() =>
+            Task.FromResult(
+                new DecisionResult(
+                    new Dictionary<string, Answer>
+                    {
+                        [QuestionKey.For<Lane>()] = new ChoiceAnswer("Left"),
+                    }
+                )
+            );
+    }
+
+    /// <summary>Notes the basket it was handed, then changes it, and chooses Left.</summary>
+    private sealed class MutatingShadow(string mark) : IShadow, IOtherShadow
+    {
+        public Basket? Seen { get; private set; }
+
+        public string? Saw { get; private set; }
+
+        public Task<DecisionResult> Decide(DecisionRequest request, CancellationToken ct)
+        {
+            var basket = (Basket)request.State;
+
+            lock (basket)
+            {
+                Seen = basket;
+                Saw = $"{basket.Name}: {string.Join(", ", basket.Items)}";
+                basket.Name = mark;
+                basket.Items.Add(mark);
+            }
+
+            return SeeingDecider.Left();
+        }
+    }
+
+    /// <summary>A scoped service that says when its scope disposed it.</summary>
+    private sealed class Tracked : IDisposable
+    {
+        public TaskCompletionSource Disposed { get; } =
+            new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public void Dispose() => Disposed.TrySetResult();
+    }
+
+    /// <summary>A shadow, holding a scoped service, that ignores cancellation and never returns.</summary>
+    private sealed class HangingWith(Tracked tracked) : IShadow
+    {
+        public Tracked Tracked => tracked;
+
+        public Task<DecisionResult> Decide(DecisionRequest request, CancellationToken ct) =>
+            new TaskCompletionSource<DecisionResult>().Task;
     }
 
     private sealed class HangingShadow : IShadow
