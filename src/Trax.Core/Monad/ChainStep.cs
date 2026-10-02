@@ -82,6 +82,29 @@ public sealed class ChainRecorder
 {
     internal ChainRecorder() { }
 
+    /// <summary>
+    /// A recorder for one track of a routing step, sharing the question keys of the chain it is
+    /// part of.
+    /// </summary>
+    internal ChainRecorder(ChainRecorder chain) => _questionKeys = chain._questionKeys;
+
+    /// <summary>
+    /// The type each question key was first asked about, across the whole chain and its tracks.
+    /// </summary>
+    private readonly Dictionary<string, Type> _questionKeys = [];
+
+    /// <summary>
+    /// Notes that the chain asks about <paramref name="about"/> under <paramref name="key"/>, and
+    /// returns the other type the chain already asked about under that key, or null.
+    /// </summary>
+    internal Type? ClaimQuestionKey(string key, Type about)
+    {
+        if (_questionKeys.TryAdd(key, about))
+            return null;
+
+        return _questionKeys[key] == about ? null : _questionKeys[key];
+    }
+
     private readonly List<ChainStep> _steps = [];
 
     private readonly List<string> _refusals = [];

@@ -16,6 +16,12 @@ public partial class Monad<TInput, TReturn>
     /// </summary>
     private readonly Dictionary<string, int> _askings = [];
 
+    /// <summary>
+    /// The type each question key was asked about in this run, so two types asked under one key
+    /// are refused here as the startup check refuses them.
+    /// </summary>
+    private readonly Dictionary<string, Type> _askedAbout = [];
+
     #region Public API
 
     /// <summary>
@@ -271,6 +277,13 @@ public partial class Monad<TInput, TReturn>
         // A declaration the startup check refuses is refused here too, for a host that skips it.
         if (questions.Problems.ToList() is { Count: > 0 } problems)
             return Refuse(step, $"{step} {string.Join(" ", problems)}");
+
+        foreach (var spec in questions.Specs)
+            if (!_askedAbout.TryAdd(spec.Key, spec.On) && _askedAbout[spec.Key] != spec.On)
+                return Refuse(
+                    step,
+                    $"{step} {QuestionKey.Shared(spec.Key, _askedAbout[spec.Key], spec.On)}"
+                );
 
         var state = this.ExtractTypeFromMemory<TState, TInput, TReturn>(missing =>
             $"{at} decides from '{missing.ReadableName()}'"
@@ -872,6 +885,16 @@ public partial class Monad<TInput, TReturn>
         foreach (var problem in questions.Problems)
             recorder.RefuseStep(ChainStepKind.Decide, questions.Decider, $"{step} {problem}");
 
+        // Two types asked under one key anywhere in the chain, tracks included, would have their
+        // answers recorded and replayed as if they were one question's.
+        foreach (var spec in questions.Specs)
+            if (recorder.ClaimQuestionKey(spec.Key, spec.On) is { } other)
+                recorder.RefuseStep(
+                    ChainStepKind.Decide,
+                    questions.Decider,
+                    $"{step} {QuestionKey.Shared(spec.Key, other, spec.On)}"
+                );
+
         var first = recorder.Steps.Count;
 
         if (questions.Specs.Count == 0)
@@ -938,8 +961,8 @@ public partial class Monad<TInput, TReturn>
     /// </summary>
     private ChainRecorder RecordTrack(DeclaredTrack<TInput, TReturn> track)
     {
-        var steps = new ChainRecorder();
         var outer = Recorder;
+        var steps = new ChainRecorder(outer!);
         Recorder = steps;
 
         try

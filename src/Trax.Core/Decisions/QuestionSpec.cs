@@ -87,6 +87,13 @@ internal abstract class QuestionSpec
     protected static string? Asks(Type type, string? asking) =>
         asking ?? type.GetCustomAttribute<AsksAttribute>()?.Question;
 
+    /// <summary>
+    /// What is wrong with the question about <paramref name="type"/> as it is worded and keyed,
+    /// or null.
+    /// </summary>
+    protected static string? Unworded(Type type, string? instructions) =>
+        instructions is null ? MissingQuestion(type) : QuestionKey.Problem(type);
+
     protected static string MissingQuestion(Type type) =>
         $"asks nothing about '{type.ReadableName()}'. A model sees only the question, never the "
         + "type's name: pass asking: or put [Asks(\"...\")] on the type.";
@@ -169,7 +176,7 @@ internal sealed class ChoiceSpec<TTrack>(
     public override Type DecisionType => typeof(ChoiceDecision<TTrack>);
 
     public override string? Problem =>
-        _instructions is null ? MissingQuestion(typeof(TTrack))
+        Unworded(typeof(TTrack), _instructions) is { } unworded ? unworded
         : _offered.Count == 0 ? $"offers no options for '{typeof(TTrack).ReadableName()}'."
         : null;
 
@@ -240,7 +247,7 @@ internal sealed class ScoreSpec<TLevel>(string? asking) : QuestionSpec
     public override Type DecisionType => typeof(ScoreDecision<TLevel>);
 
     public override string? Problem =>
-        _instructions is null ? MissingQuestion(typeof(TLevel))
+        Unworded(typeof(TLevel), _instructions) is { } unworded ? unworded
         : Levels.Count < 2
             ? $"rates on '{typeof(TLevel).ReadableName()}', which has fewer than two levels."
         : null;
@@ -320,8 +327,7 @@ internal sealed class YesNoSpec<TQuestion>(string? asking, string? yes, string? 
 
     public override Type DecisionType => typeof(YesNoDecision<TQuestion>);
 
-    public override string? Problem =>
-        _instructions is null ? MissingQuestion(typeof(TQuestion)) : null;
+    public override string? Problem => Unworded(typeof(TQuestion), _instructions);
 
     public override Question ToQuestion() =>
         new YesNoQuestion(Key, _instructions!, yes ?? Attribute?.Yes, no ?? Attribute?.No);

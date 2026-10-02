@@ -186,24 +186,7 @@ public class DeciderTests : TestSetup
     #region Question keys
 
     [Test]
-    public void QuestionKey_IsTheFullNameWithDotsForNesting() =>
-        QuestionKey
-            .For<Lane>()
-            .Should()
-            .Be("Trax.Core.Tests.Unit.UnitTests.Decisions.DeciderTests.Lane");
-
-    [Test]
-    public void QuestionKey_WritesGenericArgumentsInSquareBrackets() =>
-        QuestionKey
-            .For<Wrapper<Flag>>()
-            .Should()
-            .Be(
-                "Trax.Core.Tests.Unit.UnitTests.Decisions.DeciderTests.Wrapper["
-                    + "Trax.Core.Tests.Unit.UnitTests.Decisions.DeciderTests.Flag]"
-            );
-
-    [Test]
-    public void QuestionKey_TellsApartTypesThatShareAShortName()
+    public void QuestionKey_TellsApartNestedTypesThatShareAName()
     {
         QuestionKey.For<Billing.Priority>().Should().NotBe(QuestionKey.For<Support.Priority>());
         QuestionKey.For<Wrapper<Flag>>().Should().NotBe(QuestionKey.For<Wrapper<Lane>>());
@@ -223,7 +206,7 @@ public class DeciderTests : TestSetup
     }
 
     [Test]
-    public async Task QuestionKey_RuleDeciderKeepsARulePerFullName()
+    public async Task QuestionKey_RuleDeciderKeepsARulePerKey()
     {
         var rules = new RuleDecider()
             .YesNo<string, Wrapper<Flag>>(_ => true)
@@ -292,7 +275,7 @@ public class DeciderTests : TestSetup
 
     #region Fixtures
 
-    /// <summary>Two enums with one short name, as two namespaces would have them.</summary>
+    /// <summary>Two enums with one name, nested in different types.</summary>
     public static class Billing
     {
         [Asks("How soon must billing act?")]

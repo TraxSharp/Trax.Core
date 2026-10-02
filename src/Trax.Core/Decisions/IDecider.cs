@@ -45,9 +45,10 @@ public sealed record DecisionRequest(string Train, object State, IReadOnlyList<Q
 /// <see cref="Instructions"/> and the criteria.
 /// </summary>
 /// <remarks>
-/// The key is <see cref="QuestionKey.For(Type)"/> of the type the question is about. It is not
-/// meant to inform a model, but it is not hidden from one either: an adapter may send it as the
-/// question's id, as the System One adapter does, so it carries the type's full name.
+/// The key is <see cref="QuestionKey.For(Type)"/> of the type the question is about: the
+/// <see cref="AsksAttribute.Key"/> on it, or else its name without the namespace. It is not meant
+/// to inform a model, but it is not hidden from one either: an adapter may send it as the
+/// question's id, as the System One adapter does.
 /// </remarks>
 /// <param name="Key">Identifies the question in <see cref="DecisionResult.Answers"/>.</param>
 /// <param name="Instructions">What is being asked, in words.</param>

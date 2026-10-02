@@ -20,6 +20,19 @@ public sealed class AsksAttribute(string question) : Attribute
 
     /// <summary>For a yes/no question, what a no means.</summary>
     public string? No { get; init; }
+
+    /// <summary>
+    /// The key the question is asked under, in place of the type's name: 1 to
+    /// <see cref="QuestionKey.MaxLength"/> ASCII letters, digits, <c>_</c>, <c>-</c> or <c>.</c>,
+    /// such as <c>refund_choice</c>.
+    /// </summary>
+    /// <remarks>
+    /// The key identifies the question to a decider, to a model's adapter, and to a replay of an
+    /// earlier run. Set it to keep the key a type had before it was renamed, so a requeued run
+    /// still replays what the original answered, or to tell apart two types in one train that
+    /// share a name. See <see cref="QuestionKey"/>.
+    /// </remarks>
+    public string? Key { get; init; }
 }
 
 /// <summary>

@@ -9,6 +9,7 @@ namespace Trax.Core.Decisions
     public sealed class AsksAttribute : System.Attribute
     {
         public AsksAttribute(string question) { }
+        public string? Key { get; init; }
         public string? No { get; init; }
         public string Question { get; }
         public string? Yes { get; init; }
@@ -102,8 +103,10 @@ namespace Trax.Core.Decisions
     }
     public static class QuestionKey
     {
+        public const int MaxLength = 100;
         public static string For(System.Type type) { }
         public static string For<T>() { }
+        public static bool IsValid(string? key) { }
     }
     public sealed class Questions<TState>
     {

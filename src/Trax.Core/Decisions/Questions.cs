@@ -143,10 +143,12 @@ public sealed class Questions<TState>
 
     internal Questions<TState> Add(QuestionSpec spec)
     {
-        if (_specs.Any(s => s.Key == spec.Key))
+        if (_specs.FirstOrDefault(s => s.Key == spec.Key) is { } earlier)
             _problems.Add(
-                $"asks about '{spec.On.ReadableName()}' twice. Ask each question once; its "
-                    + "decision stays in Memory for every step after it."
+                earlier.On == spec.On
+                    ? $"asks about '{spec.On.ReadableName()}' twice. Ask each question once; its "
+                        + "decision stays in Memory for every step after it."
+                    : QuestionKey.Shared(spec.Key, earlier.On, spec.On)
             );
 
         _specs.Add(spec);
