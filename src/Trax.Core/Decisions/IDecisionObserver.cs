@@ -43,6 +43,12 @@ public interface IDecisionObserver
 /// How many times this run asked the question before, from 0: the number
 /// <see cref="IDecisionReplay.Replay"/> is given to find this answer again.
 /// </param>
+/// <param name="Fingerprint">
+/// Identifies this asking of the question as the chain declares it: the step, the state's type,
+/// the question's words and its options or levels, never the state's value. A host that replays
+/// stores it with the answer and returns it in <see cref="RecordedAnswer.Fingerprint"/>, and an
+/// answer whose fingerprint differs from the asking it is replayed into is not acted on.
+/// </param>
 /// <param name="Answer">The answer the run acts on.</param>
 /// <param name="Decider">The decider that answered, or null when the answer was replayed.</param>
 /// <param name="Replayed">True when the answer came from an earlier run rather than a decider.</param>
@@ -59,6 +65,7 @@ public sealed record DecisionMade(
     string RunId,
     Question Question,
     int Occurrence,
+    string Fingerprint,
     Answer Answer,
     Type? Decider,
     bool Replayed,
@@ -104,20 +111,46 @@ public sealed record TrackRouted(
 /// </summary>
 /// <remarks>
 /// Optional: found in Memory, then in the container. A host that requeues runs implements it from
-/// what it recorded through <see cref="IDecisionObserver"/>, keyed by
-/// <see cref="DecisionMade.Occurrence"/>. A replayed answer is checked exactly as a fresh one is;
+/// what it recorded through <see cref="IDecisionObserver"/>: the
+/// <see cref="DecisionMade.Answer"/> and <see cref="DecisionMade.Fingerprint"/>, keyed by train,
+/// run, <see cref="Question.Key"/> and <see cref="DecisionMade.Occurrence"/>. It is asked once per
+/// question, on the run's path, before the decider, so a lookup should be quick.
+///
+/// <para>A replayed answer is checked before it is acted on. One whose fingerprint differs from the
+/// question as it is asked now was given to a different asking (the question was reworded, its
+/// options or levels changed, or the chain changed so that another step now asks it first), and
 /// one that no longer fits the question (an option renamed or removed, a scale with fewer levels,
-/// a different kind of question) is not acted on, and the decider is asked afresh, with the reason
-/// in <see cref="DecisionMade.ReplayRefused"/>. A recorded choice of a member the step has no track
-/// for is replayed like any other, and takes the fallback track again, as it did the first time. Shadows are not asked a
-/// question whose answer is replayed.
+/// a different kind of question) cannot repeat what the earlier run did. Neither is acted on: the
+/// decider is asked afresh, with the reason in <see cref="DecisionMade.ReplayRefused"/>. A recorded
+/// choice of a member the step has no track for is replayed like any other, and takes the
+/// fallback track again, as it did the first time. Shadows are not asked a question whose answer
+/// is replayed.</para>
+///
+/// <para>Whatever it throws fails the step, classified as the exception says, because a replay
+/// that cannot be read cannot be told from a run with nothing to replay.</para>
 /// </remarks>
 public interface IDecisionReplay
 {
     /// <summary>
     /// The answer to replay for the <paramref name="occurrence"/>th asking (from 0, as
     /// <see cref="DecisionMade.Occurrence"/> numbers it) of the question <paramref name="key"/> in
-    /// the run <paramref name="runId"/>, or null to ask the decider.
+    /// the run <paramref name="runId"/>, with the fingerprint it was recorded under, or null to ask
+    /// the decider.
     /// </summary>
-    Answer? Replay(string train, string runId, string key, int occurrence);
+    Task<RecordedAnswer?> Replay(
+        string train,
+        string runId,
+        string key,
+        int occurrence,
+        CancellationToken cancellationToken
+    );
 }
+
+/// <summary>
+/// An answer an earlier run acted on, as a host recorded it.
+/// </summary>
+/// <param name="Answer">The answer, as <see cref="DecisionMade.Answer"/> carried it.</param>
+/// <param name="Fingerprint">
+/// The <see cref="DecisionMade.Fingerprint"/> the answer was recorded with, exactly as given.
+/// </param>
+public sealed record RecordedAnswer(Answer Answer, string Fingerprint);

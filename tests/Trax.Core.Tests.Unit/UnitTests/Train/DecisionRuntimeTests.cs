@@ -76,16 +76,22 @@ public class DecisionRuntimeTests : TestSetup
     {
         var shadow = new ScriptedShadow(new ScriptedDecider().Choose(Lane.Right).YesNo<Flag>(0.9));
         var observer = new RecordingObserver();
+        Func<MonadTask<string, bool>, MonadTask<string, bool>> chain = t =>
+            t.Decide<string>(q => q.Choice<Lane>().YesNo<Flag>().Shadow<IShadow>())
+                .Switch<Lane>(s => Lanes(s, []));
+        var journal = await Recorded(
+            chain,
+            new Services().With<IShadow>(new ScriptedShadow(new ScriptedDecider())),
+            new ScriptedDecider().Choose(Lane.Right).YesNo<Flag>(0.5)
+        );
 
         var result = await Run(
-            t =>
-                t.Decide<string>(q => q.Choice<Lane>().YesNo<Flag>().Shadow<IShadow>())
-                    .Switch<Lane>(s => Lanes(s, [])),
+            chain,
             new Services()
                 .With<IDecider>(new ScriptedDecider().YesNo<Flag>(0.1))
                 .With<IShadow>(shadow)
                 .With<IDecisionReplay>(
-                    new FixedReplay(QuestionKey.For<Lane>(), new ChoiceAnswer("Left"))
+                    journal.Hold(QuestionKey.For<Lane>(), new ChoiceAnswer("Left"))
                 )
                 .With<IDecisionObserver>(observer)
         );
@@ -107,16 +113,22 @@ public class DecisionRuntimeTests : TestSetup
     public async Task Shadow_WhenEveryAnswerIsReplayed_IsNotAskedAtAll()
     {
         var shadow = new ScriptedShadow(new ScriptedDecider().Choose(Lane.Right));
+        Func<MonadTask<string, bool>, MonadTask<string, bool>> chain = t =>
+            t.Decide<string>(q => q.Choice<Lane>().Shadow<IShadow>())
+                .Switch<Lane>(s => Lanes(s, []));
+        var journal = await Recorded(
+            chain,
+            new Services().With<IShadow>(new ScriptedShadow(new ScriptedDecider())),
+            new ScriptedDecider().Choose(Lane.Left)
+        );
 
         var result = await Run(
-            t =>
-                t.Decide<string>(q => q.Choice<Lane>().Shadow<IShadow>())
-                    .Switch<Lane>(s => Lanes(s, [])),
+            chain,
             new Services()
                 .With<IDecider>(new ScriptedDecider())
                 .With<IShadow>(shadow)
                 .With<IDecisionReplay>(
-                    new FixedReplay(QuestionKey.For<Lane>(), new ChoiceAnswer("Left"))
+                    journal.Hold(QuestionKey.For<Lane>(), new ChoiceAnswer("Left"))
                 )
         );
 
@@ -370,17 +382,17 @@ public class DecisionRuntimeTests : TestSetup
         var decider = new ScriptedDecider().Choose(Lane.Left);
         var observer = new RecordingObserver();
         var log = new List<string>();
+        var journal = await Recorded(
+            LeftOrOtherwise([]),
+            new Services(),
+            new ScriptedDecider().Choose(Lane.Left)
+        );
 
         var result = await Run(
-            t =>
-                t.Switch<string, Lane>(s =>
-                        s.When(Lane.Left, l => l.Chain(new Mark(log, "Left")))
-                            .Otherwise(o => o.Chain(new Mark(log, "Otherwise")))
-                    )
-                    .Chain<StringToBool>(),
+            LeftOrOtherwise(log),
             new Services()
                 .With<IDecider>(decider)
-                .With<IDecisionReplay>(new FixedReplay(QuestionKey.For<Lane>(), recorded))
+                .With<IDecisionReplay>(journal.Hold(QuestionKey.For<Lane>(), recorded))
                 .With<IDecisionObserver>(observer)
         );
 
@@ -412,19 +424,17 @@ public class DecisionRuntimeTests : TestSetup
         var decider = new ScriptedDecider().Choose(Lane.Left);
         var observer = new RecordingObserver();
         var log = new List<string>();
+        var journal = await Recorded(
+            LeftOrOtherwise([]),
+            new Services(),
+            new ScriptedDecider().Choose(Lane.Right)
+        );
 
         var result = await Run(
-            t =>
-                t.Switch<string, Lane>(s =>
-                        s.When(Lane.Left, l => l.Chain(new Mark(log, "Left")))
-                            .Otherwise(o => o.Chain(new Mark(log, "Otherwise")))
-                    )
-                    .Chain<StringToBool>(),
+            LeftOrOtherwise(log),
             new Services()
                 .With<IDecider>(decider)
-                .With<IDecisionReplay>(
-                    new FixedReplay(QuestionKey.For<Lane>(), new ChoiceAnswer("Right"))
-                )
+                .With<IDecisionReplay>(journal)
                 .With<IDecisionObserver>(observer)
         );
 
@@ -440,14 +450,15 @@ public class DecisionRuntimeTests : TestSetup
     public async Task Replay_AScoreOffTheScaleNow_IsAskedAfresh()
     {
         var observer = new RecordingObserver();
+        Func<MonadTask<string, bool>, MonadTask<string, bool>> chain = t =>
+            t.Scale<string, Level>(s => s.AtLeast(Level.Low, l => l)).Chain<StringToBool>();
+        var journal = await Recorded(chain, new Services(), new ScriptedDecider().Score<Level>(2));
 
         var result = await Run(
-            t => t.Scale<string, Level>(s => s.AtLeast(Level.Low, l => l)).Chain<StringToBool>(),
+            chain,
             new Services()
                 .With<IDecider>(new ScriptedDecider().Score<Level>(1))
-                .With<IDecisionReplay>(
-                    new FixedReplay(QuestionKey.For<Level>(), new ScoreAnswer(4))
-                )
+                .With<IDecisionReplay>(journal.Hold(QuestionKey.For<Level>(), new ScoreAnswer(4)))
                 .With<IDecisionObserver>(observer)
         );
 
@@ -458,6 +469,131 @@ public class DecisionRuntimeTests : TestSetup
             .Match<DecisionMade>(d =>
                 !d.Replayed && d.ReplayRefused!.Contains("outside its levels 0 to 2")
             );
+    }
+
+    [Test]
+    public async Task Replay_AfterAnotherAskingOfTheSameQuestionIsInsertedAheadOfIt_IsAskedAfresh()
+    {
+        // The earlier run asked about the lane once, in the Switch. The chain now asks about it
+        // first in a Decide, so the answer recorded for the first asking was given to another
+        // step, and replaying it there would act on a decision about something else.
+        var journal = await Recorded(
+            t => t.Switch<string, Lane>(s => Lanes(s, [])),
+            new Services(),
+            new ScriptedDecider().Choose(Lane.Right)
+        );
+        var decider = new ScriptedDecider().Choose(Lane.Left);
+        var observer = new RecordingObserver();
+
+        var result = await Run(
+            t => t.Decide<string>(q => q.Choice<Lane>()).Switch<string, Lane>(s => Lanes(s, [])),
+            new Services()
+                .With<IDecider>(decider)
+                .With<IDecisionReplay>(journal)
+                .With<IDecisionObserver>(observer)
+        );
+
+        result.IsRight.Should().BeTrue();
+        decider.Requests.Should().HaveCount(2, "neither asking matches what was recorded");
+
+        var first = observer.Decisions[0];
+        first.Replayed.Should().BeFalse();
+        first.ReplayRefused.Should().Contain("an earlier version of the chain asked it");
+        ((ChoiceAnswer)first.Answer).Choice.Should().Be("Left");
+    }
+
+    [Test]
+    public async Task Replay_OfAQuestionSinceReworded_IsAskedAfresh()
+    {
+        var journal = await Recorded(
+            t => t.Switch<string, Lane>(s => Lanes(s, []), asking: "Which lane is open?"),
+            new Services(),
+            new ScriptedDecider().Choose(Lane.Right)
+        );
+        var observer = new RecordingObserver();
+        var log = new List<string>();
+
+        var result = await Run(
+            t => t.Switch<string, Lane>(s => Lanes(s, log), asking: "Which lane is closed?"),
+            new Services()
+                .With<IDecider>(new ScriptedDecider().Choose(Lane.Left))
+                .With<IDecisionReplay>(journal)
+                .With<IDecisionObserver>(observer)
+        );
+
+        result.IsRight.Should().BeTrue();
+        log.Should().Equal("Left");
+        observer
+            .Decisions.Single()
+            .ReplayRefused.Should()
+            .Contain("an earlier version of the chain asked it");
+    }
+
+    [Test]
+    public async Task Replay_TheFingerprintIsTheSameOnEveryRunOfAnUnchangedChain()
+    {
+        var first = new RecordingObserver();
+        var second = new RecordingObserver();
+
+        await Run(
+            t => t.Switch<string, Lane>(s => Lanes(s, [])),
+            new Services()
+                .With<IDecider>(new ScriptedDecider().Choose(Lane.Left))
+                .With<IDecisionObserver>(first)
+        );
+        await Run(
+            t => t.Switch<string, Lane>(s => Lanes(s, [])),
+            new Services()
+                .With<IDecider>(new ScriptedDecider().Choose(Lane.Right))
+                .With<IDecisionObserver>(second)
+        );
+
+        first.Decisions.Single().Fingerprint.Should().NotBeNullOrEmpty();
+        second
+            .Decisions.Single()
+            .Fingerprint.Should()
+            .Be(first.Decisions.Single().Fingerprint, "the state and the answer play no part");
+    }
+
+    [Test]
+    public async Task Replay_IsAskedWithTheRunsCancellationToken()
+    {
+        using var cts = new CancellationTokenSource();
+        var replay = new CountingReplay();
+
+        var train = new DecidingTrain(
+            t => t.Switch<string, Lane>(s => Lanes(s, [])),
+            new Services()
+                .With<IDecider>(new ScriptedDecider().Choose(Lane.Left))
+                .With<IDecisionReplay>(replay)
+        )
+        {
+            CancellationToken = cts.Token,
+        };
+
+        (await train.RunEither("x")).IsRight.Should().BeTrue();
+        replay.Tokens.Should().Equal(cts.Token);
+    }
+
+    [Test]
+    public async Task Replay_ThatFails_FailsTheStepBeforeTheDeciderIsAsked()
+    {
+        var decider = new ScriptedDecider().Choose(Lane.Left);
+
+        var failure = Failure(
+            await Run(
+                t => t.Switch<string, Lane>(s => Lanes(s, [])),
+                new Services()
+                    .With<IDecider>(decider)
+                    .With<IDecisionReplay>(
+                        new CountingReplay { Throws = new TimeoutException("journal timed out") }
+                    )
+            )
+        );
+
+        failure.Should().BeOfType<TimeoutException>();
+        Data(failure).Junction.Should().Be("Switch<String, Lane>");
+        decider.Requests.Should().BeEmpty();
     }
 
     #endregion
@@ -863,20 +999,99 @@ public class DecisionRuntimeTests : TestSetup
         }
     }
 
-    private sealed class FixedReplay(string key, Answer answer) : IDecisionReplay
+    /// <summary>
+    /// Runs <paramref name="chain"/> once with <paramref name="decider"/>, recording what it asked
+    /// the way a host's journal does, so a later run of the chain can replay it.
+    /// </summary>
+    private static async Task<Journal> Recorded(
+        Func<MonadTask<string, bool>, MonadTask<string, bool>> chain,
+        Services services,
+        IDecider decider
+    )
     {
-        public Answer? Replay(string train, string runId, string question, int occurrence) =>
-            question == key && occurrence == 0 ? answer : null;
+        var journal = new Journal();
+        await Run(chain, services.With<IDecider>(decider).With<IDecisionObserver>(journal));
+        return journal;
+    }
+
+    /// <summary>A Left track, and an Otherwise for anything else, each noting that it ran.</summary>
+    private static Func<MonadTask<string, bool>, MonadTask<string, bool>> LeftOrOtherwise(
+        List<string> log
+    ) =>
+        t =>
+            t.Switch<string, Lane>(s =>
+                    s.When(Lane.Left, l => l.Chain(new Mark(log, "Left")))
+                        .Otherwise(o => o.Chain(new Mark(log, "Otherwise")))
+                )
+                .Chain<StringToBool>();
+
+    /// <summary>
+    /// Records every answer with its fingerprint and replays it by key and occurrence, as a host's
+    /// journal does. <see cref="Hold"/> replaces a recorded answer, keeping the fingerprint, to
+    /// replay an answer of the test's choosing against the question as it was really asked.
+    /// </summary>
+    private sealed class Journal : IDecisionObserver, IDecisionReplay
+    {
+        private readonly Dictionary<(string Key, int Occurrence), RecordedAnswer> _recorded = [];
+
+        /// <summary>What a test chose to replay, which replaces everything recorded.</summary>
+        private Dictionary<(string Key, int Occurrence), RecordedAnswer>? _held;
+
+        public Journal Hold(string key, Answer answer)
+        {
+            _held ??= [];
+            _held[(key, 0)] = new RecordedAnswer(answer, _recorded[(key, 0)].Fingerprint);
+            return this;
+        }
+
+        public Task Decided(DecisionMade decision, CancellationToken cancellationToken)
+        {
+            _recorded[(decision.Question.Key, decision.Occurrence)] = new RecordedAnswer(
+                decision.Answer,
+                decision.Fingerprint
+            );
+            return Task.CompletedTask;
+        }
+
+        public Task Routed(TrackRouted routing, CancellationToken cancellationToken) =>
+            Task.CompletedTask;
+
+        public async Task<RecordedAnswer?> Replay(
+            string train,
+            string runId,
+            string key,
+            int occurrence,
+            CancellationToken cancellationToken
+        )
+        {
+            // A host reads its journal from a database, so the run awaits it.
+            await Task.Yield();
+            return (_held ?? _recorded).GetValueOrDefault((key, occurrence));
+        }
     }
 
     private sealed class CountingReplay : IDecisionReplay
     {
         public List<int> Occurrences { get; } = [];
 
-        public Answer? Replay(string train, string runId, string key, int occurrence)
+        public List<CancellationToken> Tokens { get; } = [];
+
+        public Exception? Throws { get; init; }
+
+        public Task<RecordedAnswer?> Replay(
+            string train,
+            string runId,
+            string key,
+            int occurrence,
+            CancellationToken cancellationToken
+        )
         {
+            if (Throws is not null)
+                return Task.FromException<RecordedAnswer?>(Throws);
+
             Occurrences.Add(occurrence);
-            return null;
+            Tokens.Add(cancellationToken);
+            return Task.FromResult<RecordedAnswer?>(null);
         }
     }
 

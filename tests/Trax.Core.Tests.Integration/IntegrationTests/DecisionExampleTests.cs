@@ -426,20 +426,32 @@ public class DecisionExampleTests
     [Test]
     public async Task Replay_TakesTheEarlierRunsAnswerWithoutAskingTheDecider()
     {
+        var journal = new Journal();
+        var application = new LoanApplication("a6", 700, 0.4m);
+
+        (
+            await new ReplayedUnderwriting(
+                new ScriptedDecider().Choose(Underwriting.Approve, model: "jev-1.13.0"),
+                journal,
+                journal
+            ).Run(application)
+        )
+            .Outcome.Should()
+            .Be("offer made");
+
+        // The requeue asks a decider that would now decline, and is never asked.
         var decider = new ScriptedDecider().Choose(Underwriting.Decline);
-        var replay = new FixedReplay(
-            QuestionKey.For<Underwriting>(),
-            new ChoiceAnswer("Approve") { Model = "jev-1.13.0" }
-        );
         var observer = new RecordingObserver();
 
-        var decision = await new ReplayedUnderwriting(decider, replay, observer).Run(
-            new LoanApplication("a6", 700, 0.4m)
-        );
+        var decision = await new ReplayedUnderwriting(decider, journal, observer).Run(application);
 
         decision.Outcome.Should().Be("offer made");
         decider.Requests.Should().BeEmpty();
-        observer.Decisions.Should().ContainSingle().Which.Replayed.Should().BeTrue();
+        observer
+            .Decisions.Should()
+            .ContainSingle()
+            .Which.Should()
+            .Match<DecisionMade>(d => d.Replayed && d.Answer.Model == "jev-1.13.0");
     }
 
     #endregion
@@ -477,10 +489,33 @@ public class DecisionExampleTests
             inner.Decide(request, ct);
     }
 
-    private sealed class FixedReplay(string key, Answer answer) : IDecisionReplay
+    /// <summary>
+    /// Records every answer with its fingerprint and replays it, as a host's journal does. The
+    /// run id is ignored, so a second run stands in for a requeue of the first.
+    /// </summary>
+    private sealed class Journal : IDecisionObserver, IDecisionReplay
     {
-        public Answer? Replay(string train, string runId, string question, int occurrence) =>
-            question == key && occurrence == 0 ? answer : null;
+        private readonly Dictionary<(string Key, int Occurrence), RecordedAnswer> _recorded = [];
+
+        public Task Decided(DecisionMade decision, CancellationToken cancellationToken)
+        {
+            _recorded[(decision.Question.Key, decision.Occurrence)] = new RecordedAnswer(
+                decision.Answer,
+                decision.Fingerprint
+            );
+            return Task.CompletedTask;
+        }
+
+        public Task Routed(TrackRouted routing, CancellationToken cancellationToken) =>
+            Task.CompletedTask;
+
+        public Task<RecordedAnswer?> Replay(
+            string train,
+            string runId,
+            string key,
+            int occurrence,
+            CancellationToken cancellationToken
+        ) => Task.FromResult(_recorded.GetValueOrDefault((key, occurrence)));
     }
 
     private sealed class TriageTicketObserved(IDecider decider, IDecisionObserver observer)

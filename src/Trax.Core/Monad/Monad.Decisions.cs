@@ -28,8 +28,9 @@ public partial class Monad<TInput, TReturn>
     /// acted on, classified <see cref="FailureClass.Transient"/> because asking again may get a
     /// usable one; so does a decider that throws, classified as its exception says. A later <see cref="Switch{TTrack}"/>, <see cref="Gate{TQuestion}"/> or
     /// <see cref="Scale{TLevel}"/> routes on the decisions without asking again. An answer replayed
-    /// from an earlier run (<see cref="IDecisionReplay"/>) that no longer fits is not acted on
-    /// either; the decider is asked afresh instead. A cancelled run asks nothing.
+    /// from an earlier run (<see cref="IDecisionReplay"/>) that was given to a different asking of
+    /// the question, or no longer fits it, is not acted on either; the decider is asked afresh
+    /// instead. A cancelled run asks nothing.
     /// </remarks>
     public MonadTask<TInput, TReturn> Decide<TState>(
         Func<Questions<TState>, Questions<TState>> questions
@@ -282,6 +283,11 @@ public partial class Monad<TInput, TReturn>
         var occurrences = new Dictionary<string, int>();
         var replayed = new System.Collections.Generic.HashSet<string>();
         var replayRefused = new Dictionary<string, string>();
+        var questionsAsked = specs.ToDictionary(s => s.Key, s => s.ToQuestion());
+        var fingerprints = specs.ToDictionary(
+            s => s.Key,
+            s => QuestionFingerprint.Of(step, typeof(TState), questionsAsked[s.Key])
+        );
 
         try
         {
@@ -293,13 +299,28 @@ public partial class Monad<TInput, TReturn>
                 _askings[spec.Key] = asking + 1;
                 occurrences[spec.Key] = asking;
 
-                if (replay?.Replay(train, Train.ExternalId, spec.Key, asking) is not { } earlier)
+                if (replay is null)
                     continue;
 
-                // An answer recorded against an older declaration (an option since renamed or
-                // dropped, fewer levels, another kind of question) cannot repeat what that run
-                // did, so the decider is asked as if nothing had been recorded.
-                if (spec.ReplayProblem(earlier) is { } problem)
+                var earlier = await replay
+                    .Replay(train, Train.ExternalId, spec.Key, asking, CancellationToken)
+                    .ConfigureAwait(false);
+
+                if (earlier is null)
+                    continue;
+
+                // An answer recorded for a different asking (the question reworded, its options
+                // changed, another step now asking it first) or against an older declaration (an
+                // option since renamed or dropped, fewer levels, another kind of question) cannot
+                // repeat what that run did, so the decider is asked as if nothing had been
+                // recorded.
+                var problem =
+                    earlier.Fingerprint != fingerprints[spec.Key]
+                        ? "was given to the question as an earlier version of the chain asked it, "
+                            + "and the question or the steps asking it have changed since"
+                        : spec.ReplayProblem(earlier.Answer);
+
+                if (problem is not null)
                 {
                     replayRefused[spec.Key] =
                         $"the answer recorded for '{spec.Key}' no longer fits the question as it "
@@ -308,7 +329,7 @@ public partial class Monad<TInput, TReturn>
                     continue;
                 }
 
-                answers[spec.Key] = earlier;
+                answers[spec.Key] = earlier.Answer;
                 replayed.Add(spec.Key);
             }
         }
@@ -325,7 +346,6 @@ public partial class Monad<TInput, TReturn>
             return ObserverFailed(unresolved, step);
 
         var pending = specs.Where(s => !replayed.Contains(s.Key)).ToList();
-        var questionsAsked = specs.ToDictionary(s => s.Key, s => s.ToQuestion());
         IReadOnlyList<ShadowResult> shadowResults = [];
         Type? deciderType = null;
 
@@ -485,6 +505,7 @@ public partial class Monad<TInput, TReturn>
                 Train.ExternalId,
                 questionsAsked[spec.Key],
                 occurrences[spec.Key],
+                fingerprints[spec.Key],
                 answer,
                 wasReplayed ? null : deciderType,
                 wasReplayed,

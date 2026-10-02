@@ -47,9 +47,10 @@ namespace Trax.Core.Decisions
     }
     public sealed class DecisionMade : System.IEquatable<Trax.Core.Decisions.DecisionMade>
     {
-        public DecisionMade(string Train, string RunId, Trax.Core.Decisions.Question Question, int Occurrence, Trax.Core.Decisions.Answer Answer, System.Type? Decider, bool Replayed, System.Collections.Generic.IReadOnlyList<Trax.Core.Decisions.ShadowAnswer> Shadows, string? ReplayRefused = null) { }
+        public DecisionMade(string Train, string RunId, Trax.Core.Decisions.Question Question, int Occurrence, string Fingerprint, Trax.Core.Decisions.Answer Answer, System.Type? Decider, bool Replayed, System.Collections.Generic.IReadOnlyList<Trax.Core.Decisions.ShadowAnswer> Shadows, string? ReplayRefused = null) { }
         public Trax.Core.Decisions.Answer Answer { get; init; }
         public System.Type? Decider { get; init; }
+        public string Fingerprint { get; init; }
         public int Occurrence { get; init; }
         public Trax.Core.Decisions.Question Question { get; init; }
         public string? ReplayRefused { get; init; }
@@ -91,7 +92,7 @@ namespace Trax.Core.Decisions
     }
     public interface IDecisionReplay
     {
-        Trax.Core.Decisions.Answer? Replay(string train, string runId, string key, int occurrence);
+        System.Threading.Tasks.Task<Trax.Core.Decisions.RecordedAnswer?> Replay(string train, string runId, string key, int occurrence, System.Threading.CancellationToken cancellationToken);
     }
     public abstract class Question : System.IEquatable<Trax.Core.Decisions.Question>
     {
@@ -116,6 +117,12 @@ namespace Trax.Core.Decisions
             where TDecider :  class, Trax.Core.Decisions.IDecider { }
         public Trax.Core.Decisions.Questions<TState> WaitForShadows(System.TimeSpan wait) { }
         public Trax.Core.Decisions.Questions<TState> YesNo<TQuestion>(string? asking = null, string? yes = null, string? no = null) { }
+    }
+    public sealed class RecordedAnswer : System.IEquatable<Trax.Core.Decisions.RecordedAnswer>
+    {
+        public RecordedAnswer(Trax.Core.Decisions.Answer Answer, string Fingerprint) { }
+        public Trax.Core.Decisions.Answer Answer { get; init; }
+        public string Fingerprint { get; init; }
     }
     public sealed class RuleDecider : Trax.Core.Decisions.IDecider
     {
