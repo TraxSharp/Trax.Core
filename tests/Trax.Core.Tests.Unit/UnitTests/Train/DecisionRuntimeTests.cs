@@ -404,10 +404,36 @@ public class DecisionRuntimeTests : TestSetup
         yield return new TestCaseData(new YesNoAnswer(0.9), "not a choice").SetName(
             "Replay_AskedAfresh_AnotherKindOfAnswer"
         );
-        yield return new TestCaseData(
-            new ChoiceAnswer("Right"),
-            "'Right', which the question no longer offers"
-        ).SetName("Replay_AskedAfresh_AnOptionNoLongerOffered");
+    }
+
+    [Test]
+    public async Task Replay_AMemberTheStepHasNoTrackFor_IsReplayedAndTakesOtherwiseAgain()
+    {
+        var decider = new ScriptedDecider().Choose(Lane.Left);
+        var observer = new RecordingObserver();
+        var log = new List<string>();
+
+        var result = await Run(
+            t =>
+                t.Switch<string, Lane>(s =>
+                        s.When(Lane.Left, l => l.Chain(new Mark(log, "Left")))
+                            .Otherwise(o => o.Chain(new Mark(log, "Otherwise")))
+                    )
+                    .Chain<StringToBool>(),
+            new Services()
+                .With<IDecider>(decider)
+                .With<IDecisionReplay>(
+                    new FixedReplay(QuestionKey.For<Lane>(), new ChoiceAnswer("Right"))
+                )
+                .With<IDecisionObserver>(observer)
+        );
+
+        result.IsRight.Should().BeTrue();
+        log.Should()
+            .Equal(["Otherwise"], "the earlier run's answer took Otherwise, so this one does");
+        decider.Requests.Should().BeEmpty("a requeue repeats the earlier run, not a new decision");
+        observer.Decisions.Should().ContainSingle().Which.Replayed.Should().BeTrue();
+        observer.Routings.Single().Track.Should().Be("Otherwise");
     }
 
     [Test]

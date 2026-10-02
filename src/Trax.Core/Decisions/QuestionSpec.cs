@@ -71,7 +71,7 @@ internal abstract class QuestionSpec
     /// Why an answer recorded by an earlier run cannot be replayed for this question as it is asked
     /// now, or null when it can. It has to fit exactly as a fresh answer does.
     /// </summary>
-    public virtual string? ReplayProblem(Answer answer)
+    public string? ReplayProblem(Answer answer)
     {
         try
         {
@@ -224,23 +224,6 @@ internal sealed class ChoiceSpec<TTrack>(
             ((ChoiceDecision<TTrack>)live).Choice,
             ((ChoiceDecision<TTrack>)shadow).Choice
         );
-
-    /// <summary>
-    /// A replayed choice has to be one this question still offers. A fresh answer naming a member
-    /// that was not offered is routed to the fallback track, but a replay is meant to repeat what
-    /// the earlier run did, and an option that is no longer offered cannot be repeated.
-    /// </summary>
-    public override string? ReplayProblem(Answer answer)
-    {
-        if (base.ReplayProblem(answer) is { } problem)
-            return problem;
-
-        var choice = ((ChoiceAnswer)answer).Choice;
-
-        return _offered.Any(o => o.Option.ToString() == choice)
-            ? null
-            : $"answered '{Key}' with '{choice}', which the question no longer offers";
-    }
 }
 
 internal sealed class ScoreSpec<TLevel>(string? asking) : QuestionSpec

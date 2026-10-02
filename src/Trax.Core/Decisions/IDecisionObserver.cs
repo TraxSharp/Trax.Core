@@ -106,9 +106,10 @@ public sealed record TrackRouted(
 /// Optional: found in Memory, then in the container. A host that requeues runs implements it from
 /// what it recorded through <see cref="IDecisionObserver"/>, keyed by
 /// <see cref="DecisionMade.Occurrence"/>. A replayed answer is checked exactly as a fresh one is;
-/// one that no longer fits the question (an option renamed, removed or no longer offered, a scale
-/// with fewer levels, a different kind of question) is not acted on, and the decider is asked
-/// afresh, with the reason in <see cref="DecisionMade.ReplayRefused"/>. Shadows are not asked a
+/// one that no longer fits the question (an option renamed or removed, a scale with fewer levels,
+/// a different kind of question) is not acted on, and the decider is asked afresh, with the reason
+/// in <see cref="DecisionMade.ReplayRefused"/>. A recorded choice of a member the step has no track
+/// for is replayed like any other, and takes the fallback track again, as it did the first time. Shadows are not asked a
 /// question whose answer is replayed.
 /// </remarks>
 public interface IDecisionReplay
