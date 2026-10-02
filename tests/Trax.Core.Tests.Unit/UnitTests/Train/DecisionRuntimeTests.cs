@@ -805,6 +805,163 @@ public class DecisionRuntimeTests : TestSetup
 
     #endregion
 
+    #region Refused answers
+
+    [Test]
+    public async Task Refused_AQuestionLeftUnanswered_IsToldToTheObserverBeforeTheStepFails()
+    {
+        var observer = new RecordingObserver();
+        var log = new List<string>();
+
+        var failure = Failure(
+            await Run(
+                t => t.Switch<string, Lane>(s => Lanes(s, log)),
+                new Services()
+                    .With<IDecider>(new ScriptedDecider())
+                    .With<IDecisionObserver>(observer)
+            )
+        );
+
+        var refusal = observer.Refusals.Should().ContainSingle().Subject;
+        refusal.Question.Key.Should().Be(QuestionKey.For<Lane>());
+        refusal.Answer.Should().BeNull();
+        refusal.Decider.Should().Be<ScriptedDecider>();
+        refusal.Reason.Should().Be($"the decider gave no answer to '{QuestionKey.For<Lane>()}'");
+        refusal.Occurrence.Should().Be(0);
+        refusal.Fingerprint.Should().MatchRegex("^[0-9a-f]{64}$");
+        refusal.RunId.Should().NotBeNullOrEmpty();
+        observer.Decisions.Should().BeEmpty("nothing was decided");
+        failure.Message.Should().Contain(refusal.Reason);
+        ClassOf(failure).Should().Be(FailureClass.Transient);
+        log.Should().BeEmpty();
+    }
+
+    [Test]
+    public async Task Refused_AnAnswerThatDoesNotFit_IsToldToTheObserverWithTheAnswerAndWhy()
+    {
+        var observer = new RecordingObserver();
+        var banana = new ChoiceAnswer("Banana", 0.9) { Model = "jev-1" };
+
+        var failure = Failure(
+            await Run(
+                t => t.Switch<string, Lane>(s => Lanes(s, [])),
+                new Services()
+                    .With<IDecider>(
+                        new ScriptedDecider().Answer(QuestionKey.For<Lane>(), _ => banana)
+                    )
+                    .With<IDecisionObserver>(observer)
+            )
+        );
+
+        var refusal = observer.Refusals.Should().ContainSingle().Subject;
+        refusal.Answer.Should().Be(banana);
+        refusal
+            .Reason.Should()
+            .Be(
+                $"the decider answered '{QuestionKey.For<Lane>()}' with 'Banana', which is not "
+                    + "one of its options"
+            );
+        failure.Message.Should().Contain("'Banana', which is not one of its options");
+        ClassOf(failure).Should().Be(FailureClass.Transient);
+    }
+
+    [Test]
+    public async Task Refused_EveryBadAnswerInOneDecide_IsToldAndNamedInTheFailure()
+    {
+        var observer = new RecordingObserver();
+
+        var failure = Failure(
+            await Run(
+                t =>
+                    t.Decide<string>(q => q.Choice<Lane>().YesNo<Flag>().Score<Level>())
+                        .Switch<Lane>(s => Lanes(s, [])),
+                new Services()
+                    .With<IDecider>(new ScriptedDecider().Choose(Lane.Left).YesNo<Flag>(1.5))
+                    .With<IDecisionObserver>(observer)
+            )
+        );
+
+        observer
+            .Refusals.Select(r => (r.Question.Key, r.Answer))
+            .Should()
+            .Equal(
+                (QuestionKey.For<Flag>(), new YesNoAnswer(1.5)),
+                (QuestionKey.For<Level>(), (Answer?)null)
+            );
+        observer.Decisions.Should().BeEmpty("a step with a refused answer acts on none of them");
+        failure.Message.Should().Contain("probability of 1.5").And.Contain("gave no answer");
+    }
+
+    [Test]
+    public async Task Refused_ACascadeThatEscalatesToAnAnswerThatFits_IsNotARefusal()
+    {
+        var observer = new RecordingObserver();
+        var log = new List<string>();
+        var cascade = new CascadingDecider(
+            new ScriptedDecider().Answer(QuestionKey.For<Lane>(), _ => new ChoiceAnswer("Banana")),
+            new ScriptedDecider().Choose(Lane.Right)
+        );
+
+        var result = await Run(
+            t => t.Switch<string, Lane>(s => Lanes(s, log)),
+            new Services().With<IDecider>(cascade).With<IDecisionObserver>(observer)
+        );
+
+        result.IsRight.Should().BeTrue();
+        log.Should().Equal("Right");
+        observer.Refusals.Should().BeEmpty();
+        observer.Decisions.Should().ContainSingle();
+    }
+
+    [Test]
+    public async Task Refused_ARequiredObserverThatCannotRecordIt_LeavesTheRefusalAsTheFailure()
+    {
+        var failure = Failure(
+            await Run(
+                t => t.Switch<string, Lane>(s => Lanes(s, [])),
+                new Services()
+                    .With<IDecider>(new ScriptedDecider())
+                    .With<IDecisionObserver>(
+                        new RecordingObserver
+                        {
+                            IsRequired = true,
+                            ThrowsOnRefused = new IOException("journal unavailable"),
+                        }
+                    )
+            )
+        );
+
+        failure.Message.Should().Contain("gave no answer");
+        ClassOf(failure).Should().Be(FailureClass.Transient);
+    }
+
+    [Test]
+    public async Task Refused_AnObserverThatDoesNotListenForRefusals_StillSeesTheStepFail()
+    {
+        var failure = Failure(
+            await Run(
+                t => t.Switch<string, Lane>(s => Lanes(s, [])),
+                new Services()
+                    .With<IDecider>(new ScriptedDecider())
+                    .With<IDecisionObserver>(new DecisionsOnly())
+            )
+        );
+
+        failure.Message.Should().Contain("gave no answer");
+    }
+
+    /// <summary>Implements only what the observer had to before refusals were reported.</summary>
+    private sealed class DecisionsOnly : IDecisionObserver
+    {
+        public Task Decided(DecisionMade decision, CancellationToken cancellationToken) =>
+            Task.CompletedTask;
+
+        public Task Routed(TrackRouted routing, CancellationToken cancellationToken) =>
+            Task.CompletedTask;
+    }
+
+    #endregion
+
     #region Cancellation
 
     [Test]
@@ -1130,6 +1287,10 @@ public class DecisionRuntimeTests : TestSetup
 
         public List<TrackRouted> Routings { get; } = [];
 
+        public List<DecisionRefused> Refusals { get; } = [];
+
+        public Exception? ThrowsOnRefused { get; init; }
+
         public bool IsRequired { get; init; }
 
         public Exception? Throws { get; init; }
@@ -1153,6 +1314,15 @@ public class DecisionRuntimeTests : TestSetup
                 return Task.FromException(ThrowsOnRouted);
 
             Routings.Add(routing);
+            return Task.CompletedTask;
+        }
+
+        public Task Refused(DecisionRefused refusal, CancellationToken cancellationToken)
+        {
+            if (ThrowsOnRefused is not null)
+                return Task.FromException(ThrowsOnRefused);
+
+            Refusals.Add(refusal);
             return Task.CompletedTask;
         }
     }

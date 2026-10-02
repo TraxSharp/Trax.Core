@@ -33,7 +33,8 @@ public partial class Monad<TInput, TReturn>
     /// An answer that does not fit its question (an option that does not exist, a probability
     /// outside 0 to 1, a score off the scale), or no answer at all, fails the run rather than being
     /// acted on, classified <see cref="FailureClass.Transient"/> because asking again may get a
-    /// usable one; so does a decider that throws, classified as its exception says. A later <see cref="Switch{TTrack}"/>, <see cref="Gate{TQuestion}"/> or
+    /// usable one, and the decision observer is told of each such answer, and why, through
+    /// <see cref="IDecisionObserver.Refused"/> first; so does a decider that throws, classified as its exception says. A later <see cref="Switch{TTrack}"/>, <see cref="Gate{TQuestion}"/> or
     /// <see cref="Scale{TLevel}"/> routes on the decisions without asking again. An answer replayed
     /// from an earlier run (<see cref="IDecisionReplay"/>) that was given to a different asking of
     /// the question, or no longer fits it, is not acted on either; the decider is asked afresh
@@ -460,17 +461,19 @@ public partial class Monad<TInput, TReturn>
         }
 
         var decided = new List<(QuestionSpec Spec, Answer Answer, object Decision)>();
+        var refused =
+            new List<(QuestionSpec Spec, Answer? Answer, string Reason, string Sentence)>();
 
         foreach (var spec in specs)
         {
             // A decider that skips a question or garbles an answer is a model having a bad call,
             // not a declaration that cannot work, so asking again may well get a usable answer.
             if (!answers.TryGetValue(spec.Key, out var answer))
-                return Refuse(
-                    step,
-                    $"{at}: the decider gave no answer to '{spec.Key}', so there is nothing to act on.",
-                    FailureClass.Transient
-                );
+            {
+                var reason = $"gave no answer to '{spec.Key}'";
+                refused.Add((spec, null, reason, $"{reason}, so there is nothing to act on."));
+                continue;
+            }
 
             try
             {
@@ -479,12 +482,55 @@ public partial class Monad<TInput, TReturn>
             catch (InvalidAnswerException invalid)
             {
                 // A replayed answer was checked before it was kept, so this one is the decider's.
-                return Refuse(
-                    step,
-                    $"{at}: the decider {invalid.Message}, so it is not acted on.",
-                    FailureClass.Transient
+                refused.Add(
+                    (spec, answer, invalid.Message, $"{invalid.Message}, so it is not acted on.")
                 );
             }
+        }
+
+        if (refused.Count > 0)
+        {
+            // Told before the step fails, so the answer the run would not act on, and why, is on
+            // record next to the failure rather than lost with it.
+            if (observer is not null)
+                foreach (var (spec, answer, reason, _) in refused)
+                {
+                    var refusal = new DecisionRefused(
+                        train,
+                        Train.ExternalId,
+                        questionsAsked[spec.Key],
+                        occurrences[spec.Key],
+                        fingerprints[spec.Key],
+                        answer,
+                        deciderType!,
+                        $"the decider {reason}"
+                    );
+
+                    // The step fails on the refusal either way, so an observer that cannot record
+                    // it is only logged: its failure would hide why the step failed.
+                    if (
+                        await Tell(observer, (o, ct) => o.Refused(refusal, ct), at)
+                            .ConfigureAwait(false) is
+                        { } failed
+                    )
+                        Warn(
+                            $"{at}: the decision observer '{observer.GetType().ReadableName()}' "
+                                + $"could not record the refused answer to '{spec.Key}': "
+                                + failed.Message
+                        );
+                }
+
+            return Refuse(
+                step,
+                $"{at}: "
+                    + string.Join(
+                        " ",
+                        refused.Select(
+                            (r, i) => (i == 0 ? "the decider " : "The decider ") + r.Sentence
+                        )
+                    ),
+                FailureClass.Transient
+            );
         }
 
         CancellationToken.ThrowIfCancellationRequested();

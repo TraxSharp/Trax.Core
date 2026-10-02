@@ -60,6 +60,18 @@ namespace Trax.Core.Decisions
         public System.Collections.Generic.IReadOnlyList<Trax.Core.Decisions.ShadowAnswer> Shadows { get; init; }
         public string Train { get; init; }
     }
+    public sealed class DecisionRefused : System.IEquatable<Trax.Core.Decisions.DecisionRefused>
+    {
+        public DecisionRefused(string Train, string RunId, Trax.Core.Decisions.Question Question, int Occurrence, string Fingerprint, Trax.Core.Decisions.Answer? Answer, System.Type Decider, string Reason) { }
+        public Trax.Core.Decisions.Answer? Answer { get; init; }
+        public System.Type Decider { get; init; }
+        public string Fingerprint { get; init; }
+        public int Occurrence { get; init; }
+        public Trax.Core.Decisions.Question Question { get; init; }
+        public string Reason { get; init; }
+        public string RunId { get; init; }
+        public string Train { get; init; }
+    }
     public sealed class DecisionRequest : System.IEquatable<Trax.Core.Decisions.DecisionRequest>
     {
         public DecisionRequest(string Train, object State, System.Collections.Generic.IReadOnlyList<Trax.Core.Decisions.Question> Questions) { }
@@ -89,6 +101,7 @@ namespace Trax.Core.Decisions
     {
         bool Required { get; }
         System.Threading.Tasks.Task Decided(Trax.Core.Decisions.DecisionMade decision, System.Threading.CancellationToken cancellationToken);
+        System.Threading.Tasks.Task Refused(Trax.Core.Decisions.DecisionRefused refusal, System.Threading.CancellationToken cancellationToken);
         System.Threading.Tasks.Task Routed(Trax.Core.Decisions.TrackRouted routing, System.Threading.CancellationToken cancellationToken);
     }
     public interface IDecisionReplay

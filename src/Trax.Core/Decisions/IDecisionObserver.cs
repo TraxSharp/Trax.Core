@@ -31,7 +31,50 @@ public interface IDecisionObserver
 
     /// <summary>A routing step is sending the train down a track, before the track runs.</summary>
     Task Routed(TrackRouted routing, CancellationToken cancellationToken);
+
+    /// <summary>
+    /// The live decider gave no answer to a question, or one that does not fit it, so the step is
+    /// about to fail rather than act on it. Told once for each such question, before the step
+    /// fails; the run's failure carries the same reasons.
+    /// </summary>
+    /// <remarks>
+    /// Defaults to doing nothing. A refusal is never replayed: the step failed on it, and asking
+    /// again is what the failure's <c>Transient</c> class is for. A cascade that escalated an
+    /// answer and ended with one that fits is not a refusal, and neither is a shadow's answer,
+    /// which <see cref="ShadowAnswer.Error"/> reports. A failure to record a refusal is logged and
+    /// never replaces the refusal as the reason the step failed, even for an observer that is
+    /// <see cref="Required"/>.
+    /// </remarks>
+    Task Refused(DecisionRefused refusal, CancellationToken cancellationToken) =>
+        Task.CompletedTask;
 }
+
+/// <summary>
+/// A live answer the run would not act on: missing, or not fitting its question.
+/// </summary>
+/// <param name="Train">The train that asked.</param>
+/// <param name="RunId">The run's external id.</param>
+/// <param name="Question">The question as it was asked.</param>
+/// <param name="Occurrence">How many times this run asked the question before, from 0.</param>
+/// <param name="Fingerprint">
+/// Identifies this asking of the question, as <see cref="DecisionMade.Fingerprint"/> does.
+/// </param>
+/// <param name="Answer">What the decider answered, or null when it gave no answer.</param>
+/// <param name="Decider">The decider that was asked.</param>
+/// <param name="Reason">
+/// Why the answer was not acted on, such as <c>the decider answered 'Lane' with 'Banana', which is
+/// not one of its options</c>.
+/// </param>
+public sealed record DecisionRefused(
+    string Train,
+    string RunId,
+    Question Question,
+    int Occurrence,
+    string Fingerprint,
+    Answer? Answer,
+    Type Decider,
+    string Reason
+);
 
 /// <summary>
 /// One answered question.
