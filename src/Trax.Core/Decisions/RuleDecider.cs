@@ -58,13 +58,15 @@ public sealed class RuleDecider : IDecider
 
     private RuleDecider Add<TState>(Type about, Func<TState, Answer> rule)
     {
-        if (_rules.ContainsKey(about.Name))
+        var key = QuestionKey.For(about);
+
+        if (_rules.ContainsKey(key))
             throw new ArgumentException(
                 $"RuleDecider already has a rule for '{about.ReadableName()}'.",
                 nameof(about)
             );
 
-        _rules[about.Name] = state =>
+        _rules[key] = state =>
             state is TState typed
                 ? rule(typed)
                 : throw new InvalidOperationException(

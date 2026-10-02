@@ -223,7 +223,7 @@ public class DecisionTests : TestSetup
         string reason
     )
     {
-        var decider = new ScriptedDecider().Answer("Lane", _ => answer);
+        var decider = new ScriptedDecider().Answer(QuestionKey.For<Lane>(), _ => answer);
 
         var failure = Failure(
             await Train(
@@ -282,7 +282,7 @@ public class DecisionTests : TestSetup
                 .RunEither("x")
         )
             .Message.Should()
-            .Contain("gave no answer to 'Lane'");
+            .Contain($"gave no answer to '{QuestionKey.For<Lane>()}'");
 
     [TestCase(-0.5)]
     [TestCase(2.01)]

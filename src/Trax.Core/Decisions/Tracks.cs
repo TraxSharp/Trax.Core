@@ -14,6 +14,25 @@ internal sealed class TrackSet<TInput, TReturn>
 
     public List<string> Problems { get; } = [];
 
+    /// <summary>
+    /// The shadow deciders the step's own question is also put to. Checked where the question is
+    /// built, by <see cref="Questions{TState}"/>, so a mistake is reported once.
+    /// </summary>
+    public List<Type> Shadows { get; } = [];
+
+    /// <summary>How long to wait for the shadows, when the declaration says.</summary>
+    public TimeSpan? ShadowWait { get; set; }
+
+    /// <summary>
+    /// The refusal for shadows declared on a routing step that asks nothing, because it routes on
+    /// a decision made earlier.
+    /// </summary>
+    public string? ShadowsWithoutAQuestion =>
+        Shadows.Count > 0 || ShadowWait is not null
+            ? "declares shadows, but routes on a decision made earlier and asks nothing to "
+                + "compare. Shadow the Decide that asks it."
+            : null;
+
     public void Add(DeclaredTrack<TInput, TReturn> track)
     {
         if (Tracks.Any(t => t.Name == track.Name))
@@ -132,6 +151,55 @@ public sealed class Tracks<TInput, TReturn, TTrack>
         return this;
     }
 
+    /// <summary>
+    /// Also puts this step's question to <typeparamref name="TDecider"/>, and records whether it
+    /// would have sent the train down the same track, without acting on its answer. Only for the
+    /// form of this step that asks its own question.
+    /// </summary>
+    /// <remarks>
+    /// Agreement is judged by this step's own tracks, bars and bands. A shadow that fails, is slow
+    /// or disagrees never changes the run; see <see cref="Questions{TState}.Shadow{TDecider}"/>.
+    /// </remarks>
+    public Tracks<TInput, TReturn, TTrack> Shadow<TDecider>()
+        where TDecider : class, IDecider
+    {
+        Set.Shadows.Add(typeof(TDecider));
+        return this;
+    }
+
+    /// <summary>
+    /// How long to wait for the shadows once the live answer is in; see
+    /// <see cref="Questions{TState}.WaitForShadows"/>.
+    /// </summary>
+    public Tracks<TInput, TReturn, TTrack> WaitForShadows(TimeSpan wait)
+    {
+        Set.ShadowWait = wait;
+        return this;
+    }
+
+    /// <summary>
+    /// The track a choice takes, and why the choice was not followed when the fallback is taken.
+    /// Null when there is no track to take. Running a switch and comparing a shadow's answer both
+    /// route through here, so they cannot disagree about where a choice goes.
+    /// </summary>
+    internal (DeclaredTrack<TInput, TReturn>? Taken, string? FallbackReason) Route(
+        ChoiceDecision<TTrack> decision
+    )
+    {
+        var chosen = Set.Tracks.Find(t => t.Name == decision.Choice.ToString());
+        var required = chosen?.RequireConfidence ?? MinimumConfidence;
+
+        var reason =
+            chosen is null ? $"the decision was '{decision.Choice}', which has no track here"
+            : decision.Confidence < required
+                ? $"the decision was '{decision.Choice}' with a confidence of "
+                    + $"{QuestionSpec.Format(decision.Confidence)}, below the "
+                    + $"{QuestionSpec.Format(required)} its track requires"
+            : null;
+
+        return (reason is null ? chosen : Set.Fallback, reason);
+    }
+
     internal IReadOnlyList<(TTrack, string?)> Offered =>
         Set
             .Tracks.Select(t =>
@@ -183,6 +251,42 @@ public sealed class GateTracks<TInput, TReturn>
                     + "both.";
         }
     }
+
+    /// <summary>
+    /// Also puts this step's question to <typeparamref name="TDecider"/>, and records whether it
+    /// would have sent the train down the same track, without acting on its answer. Only for the
+    /// form of this step that asks its own question.
+    /// </summary>
+    /// <remarks>
+    /// Agreement is judged by this step's own tracks, bars and bands. A shadow that fails, is slow
+    /// or disagrees never changes the run; see <see cref="Questions{TState}.Shadow{TDecider}"/>.
+    /// </remarks>
+    public GateTracks<TInput, TReturn> Shadow<TDecider>()
+        where TDecider : class, IDecider
+    {
+        Set.Shadows.Add(typeof(TDecider));
+        return this;
+    }
+
+    /// <summary>
+    /// How long to wait for the shadows once the live answer is in; see
+    /// <see cref="Questions{TState}.WaitForShadows"/>.
+    /// </summary>
+    public GateTracks<TInput, TReturn> WaitForShadows(TimeSpan wait)
+    {
+        Set.ShadowWait = wait;
+        return this;
+    }
+
+    /// <summary>
+    /// The track a probability of yes takes, or null when it falls between the bars and there is
+    /// no Unsure track. Unsure is a declared outcome, not a decision overruled, so it carries no
+    /// fallback reason.
+    /// </summary>
+    internal DeclaredTrack<TInput, TReturn>? Route(double probability) =>
+        probability >= YesAtLeast ? YesTrack
+        : probability < NoBelow ? NoTrack
+        : Set.Fallback;
 
     /// <summary>The track taken when the probability of yes is at least <paramref name="atLeast"/>.</summary>
     public GateTracks<TInput, TReturn> Yes(
@@ -256,6 +360,65 @@ public sealed class ScaleTracks<TInput, TReturn, TLevel>
                         + "a low score has nowhere to go. Declare AtLeast for it.",
                 ]
         );
+
+    /// <summary>
+    /// Also puts this step's question to <typeparamref name="TDecider"/>, and records whether it
+    /// would have sent the train down the same track, without acting on its answer. Only for the
+    /// form of this step that asks its own question.
+    /// </summary>
+    /// <remarks>
+    /// Agreement is judged by this step's own tracks, bars and bands. A shadow that fails, is slow
+    /// or disagrees never changes the run; see <see cref="Questions{TState}.Shadow{TDecider}"/>.
+    /// </remarks>
+    public ScaleTracks<TInput, TReturn, TLevel> Shadow<TDecider>()
+        where TDecider : class, IDecider
+    {
+        Set.Shadows.Add(typeof(TDecider));
+        return this;
+    }
+
+    /// <summary>
+    /// How long to wait for the shadows once the live answer is in; see
+    /// <see cref="Questions{TState}.WaitForShadows"/>.
+    /// </summary>
+    public ScaleTracks<TInput, TReturn, TLevel> WaitForShadows(TimeSpan wait)
+    {
+        Set.ShadowWait = wait;
+        return this;
+    }
+
+    /// <summary>
+    /// The track a score takes: the one for the highest level at or below the level it rounds to,
+    /// or the fallback, with why, when its confidence is below the bar.
+    /// </summary>
+    internal (DeclaredTrack<TInput, TReturn>? Taken, string? FallbackReason) Route(
+        ScoreDecision<TLevel> decision
+    )
+    {
+        var reached = EnumMembers<TLevel>.IndexOf(decision.Nearest);
+
+        var band = Set
+            .Tracks.Select(t =>
+                (
+                    Track: t,
+                    Index: EnumMembers<TLevel>.TryParse(t.Name, out var level)
+                        ? EnumMembers<TLevel>.IndexOf(level)
+                        : int.MaxValue
+                )
+            )
+            .Where(b => b.Index <= reached)
+            .MaxBy(b => b.Index)
+            .Track;
+
+        var reason =
+            decision.Confidence < MinimumConfidence
+                ? $"the score {QuestionSpec.Format(decision.Score)} came with a confidence of "
+                    + $"{QuestionSpec.Format(decision.Confidence)}, below the "
+                    + $"{QuestionSpec.Format(MinimumConfidence)} this scale requires"
+                : null;
+
+        return (reason is null ? band : Set.Fallback, reason);
+    }
 
     /// <summary>
     /// Declares the track for a score that rounds to <paramref name="level"/> or above, up to the

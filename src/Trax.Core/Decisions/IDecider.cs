@@ -37,9 +37,14 @@ public interface IDecider
 public sealed record DecisionRequest(string Train, object State, IReadOnlyList<Question> Questions);
 
 /// <summary>
-/// One question. The key identifies it in the answers and is never shown to a model; everything a
-/// model needs to know is in <see cref="Instructions"/> and the criteria.
+/// One question. The key identifies it in the answers; everything a model needs to know is in
+/// <see cref="Instructions"/> and the criteria.
 /// </summary>
+/// <remarks>
+/// The key is <see cref="QuestionKey.For(Type)"/> of the type the question is about. It is not
+/// meant to inform a model, but it is not hidden from one either: an adapter may send it as the
+/// question's id, as the System One adapter does, so it carries the type's full name.
+/// </remarks>
 /// <param name="Key">Identifies the question in <see cref="DecisionResult.Answers"/>.</param>
 /// <param name="Instructions">What is being asked, in words.</param>
 public abstract record Question(string Key, string Instructions);

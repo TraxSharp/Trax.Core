@@ -331,7 +331,19 @@ public static class ChainVerification
 
         void ReplayDecide(int i, ChainStep step)
         {
-            if (step.In is { } state && !Satisfied(memory, state, availableElsewhere))
+            // A Decide records a step per question, each from the same state and decider. What was
+            // missing at the step before is still missing, because a Decide adds only its
+            // decision, so it is reported once, at the first question.
+            var previous =
+                i > 0 && steps[i - 1].Kind == ChainStepKind.Decide
+                    ? steps[i - 1]
+                    : (ChainStep?)null;
+
+            if (
+                step.In is { } state
+                && previous?.In != state
+                && !Satisfied(memory, state, availableElsewhere)
+            )
                 faults.Add(
                     Fault(
                         i,
@@ -343,7 +355,7 @@ public static class ChainVerification
                 );
 
             foreach (
-                var decider in step.Junction is { } live
+                var decider in step.Junction is { } live && previous?.Junction != live
                     ? chain.RequirementsAt(i).Prepend(live)
                     : chain.RequirementsAt(i)
             )

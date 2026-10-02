@@ -29,8 +29,59 @@ internal abstract class QuestionSpec
     /// <exception cref="InvalidAnswerException">The answer does not fit the question.</exception>
     public abstract object ToDecision(Answer answer);
 
-    /// <summary>Whether two answers reach the same outcome, for comparing a shadow decider.</summary>
-    public abstract bool SameOutcome(Answer live, Answer shadow);
+    /// <summary>
+    /// The name of the track a decision takes, when the step that asks this question also routes
+    /// on it, or null for a <c>Decide</c> whose routing comes later. The function itself returns
+    /// null for a decision that has no track to take.
+    /// </summary>
+    public Func<object, string?>? Route { get; init; }
+
+    /// <summary>
+    /// Whether a shadow's answer would have done what the live answer did, for comparing a shadow
+    /// decider. When the step routes on the question, that means taking the same track, by the
+    /// step's own bars and bands. A plain <c>Decide</c> knows nothing of the routing after it, so it
+    /// compares the answers themselves (<see cref="SameAnswer"/>). A shadow answer that does not fit
+    /// the question never agrees.
+    /// </summary>
+    public bool SameOutcome(Answer live, Answer shadow)
+    {
+        object liveDecision,
+            shadowDecision;
+
+        try
+        {
+            liveDecision = ToDecision(live);
+            shadowDecision = ToDecision(shadow);
+        }
+        catch (InvalidAnswerException)
+        {
+            return false;
+        }
+
+        return Route is { } route
+            ? route(liveDecision) == route(shadowDecision)
+            : SameAnswer(liveDecision, shadowDecision);
+    }
+
+    /// <summary>Whether two typed decisions say the same thing, when no routing is known.</summary>
+    protected abstract bool SameAnswer(object live, object shadow);
+
+    /// <summary>
+    /// Why an answer recorded by an earlier run cannot be replayed for this question as it is asked
+    /// now, or null when it can. It has to fit exactly as a fresh answer does.
+    /// </summary>
+    public virtual string? ReplayProblem(Answer answer)
+    {
+        try
+        {
+            ToDecision(answer);
+            return null;
+        }
+        catch (InvalidAnswerException invalid)
+        {
+            return invalid.Message;
+        }
+    }
 
     protected static string? Asks(Type type, string? asking) =>
         asking ?? type.GetCustomAttribute<AsksAttribute>()?.Question;
@@ -58,7 +109,25 @@ internal sealed class InvalidAnswerException(string message) : Exception(message
 internal static class EnumMembers<T>
     where T : struct, Enum
 {
-    public static readonly IReadOnlyList<T> Ordered = Enum.GetValues<T>().Distinct().ToList();
+    /// <summary>
+    /// The members from the lowest value to the highest, as signed numbers: <c>-1</c> comes before
+    /// <c>0</c>. <see cref="Enum.GetValues{TEnum}"/> orders by unsigned magnitude, which would put
+    /// every negative member last.
+    /// </summary>
+    public static readonly IReadOnlyList<T> Ordered = Enum.GetValues<T>()
+        .Distinct()
+        .OrderBy(SignedValue)
+        .ToList();
+
+    private static decimal SignedValue(T value) =>
+        Type.GetTypeCode(Enum.GetUnderlyingType(typeof(T))) switch
+        {
+            TypeCode.SByte or TypeCode.Int16 or TypeCode.Int32 or TypeCode.Int64 => Convert.ToInt64(
+                value,
+                CultureInfo.InvariantCulture
+            ),
+            _ => Convert.ToUInt64(value, CultureInfo.InvariantCulture),
+        };
 
     private static readonly Dictionary<string, T> ByName = Enum.GetNames<T>()
         .ToDictionary(n => n, Enum.Parse<T>, StringComparer.Ordinal);
@@ -71,7 +140,14 @@ internal static class EnumMembers<T>
             ?.GetCustomAttribute<DescriptionAttribute>()
             ?.Description;
 
-    public static int IndexOf(T value) => Ordered.ToList().IndexOf(value);
+    public static int IndexOf(T value)
+    {
+        for (var i = 0; i < Ordered.Count; i++)
+            if (EqualityComparer<T>.Default.Equals(Ordered[i], value))
+                return i;
+
+        return -1;
+    }
 }
 
 internal sealed class ChoiceSpec<TTrack>(
@@ -85,7 +161,7 @@ internal sealed class ChoiceSpec<TTrack>(
     private readonly IReadOnlyList<(TTrack Option, string? Description)> _offered =
         offered ?? EnumMembers<TTrack>.Ordered.Select(o => (o, (string?)null)).ToList();
 
-    public override string Key => typeof(TTrack).Name;
+    public override string Key => QuestionKey.For(typeof(TTrack));
 
     public override Type On => typeof(TTrack);
 
@@ -142,8 +218,28 @@ internal sealed class ChoiceSpec<TTrack>(
         return new ChoiceDecision<TTrack>(chosen, choice.Confidence, probabilities, choice.Model);
     }
 
-    public override bool SameOutcome(Answer live, Answer shadow) =>
-        live is ChoiceAnswer a && shadow is ChoiceAnswer b && a.Choice == b.Choice;
+    protected override bool SameAnswer(object live, object shadow) =>
+        EqualityComparer<TTrack>.Default.Equals(
+            ((ChoiceDecision<TTrack>)live).Choice,
+            ((ChoiceDecision<TTrack>)shadow).Choice
+        );
+
+    /// <summary>
+    /// A replayed choice has to be one this question still offers. A fresh answer naming a member
+    /// that was not offered is routed to the fallback track, but a replay is meant to repeat what
+    /// the earlier run did, and an option that is no longer offered cannot be repeated.
+    /// </summary>
+    public override string? ReplayProblem(Answer answer)
+    {
+        if (base.ReplayProblem(answer) is { } problem)
+            return problem;
+
+        var choice = ((ChoiceAnswer)answer).Choice;
+
+        return _offered.Any(o => o.Option.ToString() == choice)
+            ? null
+            : $"answered '{Key}' with '{choice}', which the question no longer offers";
+    }
 }
 
 internal sealed class ScoreSpec<TLevel>(string? asking) : QuestionSpec
@@ -153,7 +249,7 @@ internal sealed class ScoreSpec<TLevel>(string? asking) : QuestionSpec
 
     private static IReadOnlyList<TLevel> Levels => EnumMembers<TLevel>.Ordered;
 
-    public override string Key => typeof(TLevel).Name;
+    public override string Key => QuestionKey.For(typeof(TLevel));
 
     public override Type On => typeof(TLevel);
 
@@ -220,8 +316,11 @@ internal sealed class ScoreSpec<TLevel>(string? asking) : QuestionSpec
     /// <summary>The level a score rounds to, halves rounding up.</summary>
     internal static int Nearest(double score) => (int)Math.Floor(score + 0.5);
 
-    public override bool SameOutcome(Answer live, Answer shadow) =>
-        live is ScoreAnswer a && shadow is ScoreAnswer b && Nearest(a.Score) == Nearest(b.Score);
+    protected override bool SameAnswer(object live, object shadow) =>
+        EqualityComparer<TLevel>.Default.Equals(
+            ((ScoreDecision<TLevel>)live).Nearest,
+            ((ScoreDecision<TLevel>)shadow).Nearest
+        );
 }
 
 internal sealed class YesNoSpec<TQuestion>(string? asking, string? yes, string? no) : QuestionSpec
@@ -231,7 +330,7 @@ internal sealed class YesNoSpec<TQuestion>(string? asking, string? yes, string? 
 
     private readonly string? _instructions = Asks(typeof(TQuestion), asking);
 
-    public override string Key => typeof(TQuestion).Name;
+    public override string Key => QuestionKey.For(typeof(TQuestion));
 
     public override Type On => typeof(TQuestion);
 
@@ -255,8 +354,7 @@ internal sealed class YesNoSpec<TQuestion>(string? asking, string? yes, string? 
         return new YesNoDecision<TQuestion>(yesNo.Probability, yesNo.Model);
     }
 
-    public override bool SameOutcome(Answer live, Answer shadow) =>
-        live is YesNoAnswer a
-        && shadow is YesNoAnswer b
-        && a.Probability >= 0.5 == b.Probability >= 0.5;
+    protected override bool SameAnswer(object live, object shadow) =>
+        ((YesNoDecision<TQuestion>)live).Probability >= 0.5
+        == ((YesNoDecision<TQuestion>)shadow).Probability >= 0.5;
 }

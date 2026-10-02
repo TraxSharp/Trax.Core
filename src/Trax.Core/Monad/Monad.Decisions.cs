@@ -1,3 +1,4 @@
+using Microsoft.Extensions.Logging;
 using Trax.Core.Decisions;
 using Trax.Core.Exceptions;
 using Trax.Core.Extensions;
@@ -25,7 +26,9 @@ public partial class Monad<TInput, TReturn>
     /// An answer that does not fit its question (an option that does not exist, a probability
     /// outside 0 to 1, a score off the scale) fails the run rather than being acted on, as does a
     /// decider that throws. A later <see cref="Switch{TTrack}"/>, <see cref="Gate{TQuestion}"/> or
-    /// <see cref="Scale{TLevel}"/> routes on the decisions without asking again.
+    /// <see cref="Scale{TLevel}"/> routes on the decisions without asking again. An answer replayed
+    /// from an earlier run (<see cref="IDecisionReplay"/>) that no longer fits is not acted on
+    /// either; the decider is asked afresh instead. A cancelled run asks nothing.
     /// </remarks>
     public MonadTask<TInput, TReturn> Decide<TState>(
         Func<Questions<TState>, Questions<TState>> questions
@@ -57,9 +60,9 @@ public partial class Monad<TInput, TReturn>
                 step,
                 typeof(ChoiceDecision<TTrack>),
                 declared.Set,
-                SwitchProblems(declared)
+                SwitchProblems(declared).Concat(Unasked(declared.Set))
             )
-            : new(SwitchAsync(declared, step));
+            : new(SwitchAsync(declared, step, Unasked(declared.Set)));
     }
 
     /// <summary>
@@ -76,9 +79,14 @@ public partial class Monad<TInput, TReturn>
         where TTrack : struct, Enum
     {
         var declared = tracks(new Tracks<TInput, TReturn, TTrack>());
-        var question = new Questions<TState>().Add(
-            new ChoiceSpec<TTrack>(asking, declared.Offered)
-        );
+        var question = new Questions<TState>()
+            .Add(
+                new ChoiceSpec<TTrack>(asking, declared.Offered)
+                {
+                    Route = d => declared.Route((ChoiceDecision<TTrack>)d).Taken?.Name,
+                }
+            )
+            .ShadowedAs(declared.Set);
         var step = $"Switch<{typeof(TState).ReadableName()}, {typeof(TTrack).ReadableName()}>";
 
         if (Recorder is not null)
@@ -113,9 +121,9 @@ public partial class Monad<TInput, TReturn>
                 step,
                 typeof(YesNoDecision<TQuestion>),
                 declared.Set,
-                declared.Problems
+                declared.Problems.Concat(Unasked(declared.Set))
             )
-            : new(GateAsync<TQuestion>(declared, step));
+            : new(GateAsync<TQuestion>(declared, step, Unasked(declared.Set)));
     }
 
     /// <summary>
@@ -131,7 +139,14 @@ public partial class Monad<TInput, TReturn>
     )
     {
         var declared = gate(new GateTracks<TInput, TReturn>());
-        var question = new Questions<TState>().Add(new YesNoSpec<TQuestion>(asking, null, null));
+        var question = new Questions<TState>()
+            .Add(
+                new YesNoSpec<TQuestion>(asking, null, null)
+                {
+                    Route = d => declared.Route(((YesNoDecision<TQuestion>)d).Probability)?.Name,
+                }
+            )
+            .ShadowedAs(declared.Set);
         var step = $"Gate<{typeof(TState).ReadableName()}, {typeof(TQuestion).ReadableName()}>";
 
         if (Recorder is not null)
@@ -167,9 +182,9 @@ public partial class Monad<TInput, TReturn>
                 step,
                 typeof(ScoreDecision<TLevel>),
                 declared.Set,
-                declared.Problems
+                declared.Problems.Concat(Unasked(declared.Set))
             )
-            : new(ScaleAsync(declared, step));
+            : new(ScaleAsync(declared, step, Unasked(declared.Set)));
     }
 
     /// <summary>
@@ -185,7 +200,14 @@ public partial class Monad<TInput, TReturn>
         where TLevel : struct, Enum
     {
         var declared = scale(new ScaleTracks<TInput, TReturn, TLevel>());
-        var question = new Questions<TState>().Add(new ScoreSpec<TLevel>(asking));
+        var question = new Questions<TState>()
+            .Add(
+                new ScoreSpec<TLevel>(asking)
+                {
+                    Route = d => declared.Route((ScoreDecision<TLevel>)d).Taken?.Name,
+                }
+            )
+            .ShadowedAs(declared.Set);
         var step = $"Scale<{typeof(TState).ReadableName()}, {typeof(TLevel).ReadableName()}>";
 
         if (Recorder is not null)
@@ -225,6 +247,9 @@ public partial class Monad<TInput, TReturn>
         if (Exception is not null)
             return this;
 
+        // A cancelled run neither decides nor tells anyone it did, as a junction does not run.
+        CancellationToken.ThrowIfCancellationRequested();
+
         var train = Train.GetType().ReadableName();
         var at = $"{step} (train '{train}')";
 
@@ -241,7 +266,9 @@ public partial class Monad<TInput, TReturn>
 
         var specs = questions.Specs;
         var answers = new Dictionary<string, Answer>();
+        var occurrences = new Dictionary<string, int>();
         var replayed = new System.Collections.Generic.HashSet<string>();
+        var replayRefused = new Dictionary<string, string>();
 
         try
         {
@@ -251,12 +278,25 @@ public partial class Monad<TInput, TReturn>
             {
                 var asking = _askings.GetValueOrDefault(spec.Key);
                 _askings[spec.Key] = asking + 1;
+                occurrences[spec.Key] = asking;
 
-                if (replay?.Replay(train, Train.ExternalId, spec.Key, asking) is { } earlier)
+                if (replay?.Replay(train, Train.ExternalId, spec.Key, asking) is not { } earlier)
+                    continue;
+
+                // An answer recorded against an older declaration (an option since renamed or
+                // dropped, fewer levels, another kind of question) cannot repeat what that run
+                // did, so the decider is asked as if nothing had been recorded.
+                if (spec.ReplayProblem(earlier) is { } problem)
                 {
-                    answers[spec.Key] = earlier;
-                    replayed.Add(spec.Key);
+                    replayRefused[spec.Key] =
+                        $"the answer recorded for '{spec.Key}' no longer fits the question as it "
+                        + $"is asked now: it {problem}";
+                    Warn($"{at}: {replayRefused[spec.Key]}. The decider is asked afresh.");
+                    continue;
                 }
+
+                answers[spec.Key] = earlier;
+                replayed.Add(spec.Key);
             }
         }
         catch (Exception e)
@@ -264,16 +304,16 @@ public partial class Monad<TInput, TReturn>
             return Failed(e, step);
         }
 
-        var request = new DecisionRequest(
-            train,
-            state!,
-            specs.Select(s => s.ToQuestion()).ToList()
-        );
+        // Resolved before the decider is asked, so an observer that cannot be built fails the step
+        // before it costs a decision.
+        var (observer, unresolved) = ResolveObserver();
 
-        // Shadows are asked everything, alongside the live decider, and never fail the run.
-        var shadows = questions.Shadows.Select(t => AskShadow(t, request)).ToList();
+        if (unresolved is not null)
+            return ObserverFailed(unresolved, step);
 
         var pending = specs.Where(s => !replayed.Contains(s.Key)).ToList();
+        var questionsAsked = specs.ToDictionary(s => s.Key, s => s.ToQuestion());
+        IReadOnlyList<ShadowResult> shadowResults = [];
         Type? deciderType = null;
 
         if (pending.Count > 0)
@@ -286,20 +326,73 @@ public partial class Monad<TInput, TReturn>
                 ) as IDecider;
 
             if (decider is null)
-            {
-                await Task.WhenAll(shadows).ConfigureAwait(false);
                 return this;
-            }
 
             deciderType = decider.GetType();
 
+            // Shadows are resolved here, on the run's own thread, so they never read Memory while
+            // the run writes to it. One nobody registered is refused, as the startup check
+            // refuses it; one that is registered but fails, is slow or disagrees never changes
+            // the run.
+            var shadowDeciders = new List<(Type Type, IDecider? Decider, string? Error)>();
+
+            foreach (var shadow in questions.Shadows)
+            {
+                object? found;
+
+                try
+                {
+                    found = Optional(shadow);
+                }
+                catch (Exception e)
+                {
+                    shadowDeciders.Add((shadow, null, $"could not be resolved: {e.Message}"));
+                    continue;
+                }
+
+                if (found is not IDecider resolved)
+                    return Refuse(
+                        step,
+                        $"{at} needs a shadow decider '{shadow.ReadableName()}' and neither "
+                            + "Memory nor the container holds one. Register it, or hand one to "
+                            + "AddServices."
+                    );
+
+                shadowDeciders.Add((shadow, resolved, null));
+            }
+
+            // Only what the live decider is asked goes to the shadows: a replayed answer is not
+            // being decided, so there is nothing to compare.
+            var request = new DecisionRequest(
+                train,
+                state!,
+                pending.Select(s => questionsAsked[s.Key]).ToList()
+            );
+
+            var shadowing = CancellationTokenSource.CreateLinkedTokenSource(CancellationToken);
+            var shadows = shadowDeciders
+                .Select(s =>
+                    (
+                        Decider: s.Type,
+                        Asked: s.Decider is null
+                            ? Task.FromResult(new ShadowResult(s.Type, null, s.Error))
+                            : AskShadow(s.Type, s.Decider, request, shadowing.Token)
+                    )
+                )
+                .ToList();
+
+            // The source outlives this step only as long as a shadow is still running on it.
+            _ = Task.WhenAll(shadows.Select(s => s.Asked))
+                .ContinueWith(
+                    _ => shadowing.Dispose(),
+                    CancellationToken.None,
+                    TaskContinuationOptions.ExecuteSynchronously,
+                    TaskScheduler.Default
+                );
+
             try
             {
-                var live = request with
-                {
-                    Questions = request.Questions.Where(q => !replayed.Contains(q.Key)).ToList(),
-                };
-                var result = await decider.Decide(live, CancellationToken).ConfigureAwait(false);
+                var result = await decider.Decide(request, CancellationToken).ConfigureAwait(false);
 
                 foreach (var spec in pending)
                     if (result?.Answers?.GetValueOrDefault(spec.Key) is { } answer)
@@ -307,12 +400,15 @@ public partial class Monad<TInput, TReturn>
             }
             catch (Exception e)
             {
-                await Task.WhenAll(shadows).ConfigureAwait(false);
+                // The run fails here, so nothing will read what the shadows say.
+                Stop(shadowing);
                 return Failed(e, step);
             }
+
+            shadowResults = await Settle(shadows, shadowing, questions.ShadowWait)
+                .ConfigureAwait(false);
         }
 
-        var shadowResults = await Task.WhenAll(shadows).ConfigureAwait(false);
         var decided = new List<(QuestionSpec Spec, Answer Answer, object Decision)>();
 
         foreach (var spec in specs)
@@ -329,49 +425,58 @@ public partial class Monad<TInput, TReturn>
             }
             catch (InvalidAnswerException invalid)
             {
+                // A replayed answer was checked before it was kept, so this one is the decider's.
                 return Refuse(step, $"{at}: the decider {invalid.Message}, so it is not acted on.");
             }
         }
 
-        var observer = Optional<IDecisionObserver>();
+        CancellationToken.ThrowIfCancellationRequested();
 
         foreach (var (spec, answer, decision) in decided)
         {
             Memory[spec.DecisionType] = decision;
 
-            var compared = shadowResults
-                .Select(s =>
-                    s.Answers?.GetValueOrDefault(spec.Key) is { } shadow
-                        ? new ShadowAnswer(
-                            s.Decider,
-                            shadow,
-                            spec.SameOutcome(answer, shadow),
-                            null
-                        )
-                        : new ShadowAnswer(
-                            s.Decider,
-                            null,
-                            false,
-                            s.Error ?? $"gave no answer to '{spec.Key}'"
-                        )
-                )
-                .ToList();
-
-            Observe(
-                observer,
-                o =>
-                    o.Decided(
-                        new DecisionMade(
-                            train,
-                            Train.ExternalId,
-                            request.Questions.First(q => q.Key == spec.Key),
-                            answer,
-                            replayed.Contains(spec.Key) ? null : deciderType,
-                            replayed.Contains(spec.Key),
-                            compared
-                        )
+            var wasReplayed = replayed.Contains(spec.Key);
+            var compared = wasReplayed
+                ? []
+                : shadowResults
+                    .Select(s =>
+                        s.Answers?.GetValueOrDefault(spec.Key) is { } shadow
+                            ? new ShadowAnswer(
+                                s.Decider,
+                                shadow,
+                                spec.SameOutcome(answer, shadow),
+                                null
+                            )
+                            : new ShadowAnswer(
+                                s.Decider,
+                                null,
+                                false,
+                                s.Error ?? $"gave no answer to '{spec.Key}'"
+                            )
                     )
+                    .ToList();
+
+            if (observer is null)
+                continue;
+
+            var made = new DecisionMade(
+                train,
+                Train.ExternalId,
+                questionsAsked[spec.Key],
+                occurrences[spec.Key],
+                answer,
+                wasReplayed ? null : deciderType,
+                wasReplayed,
+                compared,
+                replayRefused.GetValueOrDefault(spec.Key)
             );
+
+            if (
+                await Tell(observer, (o, ct) => o.Decided(made, ct), at).ConfigureAwait(false) is
+                { } failed
+            )
+                return ObserverFailed(failed, step);
         }
 
         return this;
@@ -384,32 +489,103 @@ public partial class Monad<TInput, TReturn>
     );
 
     /// <summary>
-    /// Asks a shadow decider, turning every way it can fail into a result, so the run never
-    /// depends on it.
+    /// Asks a shadow decider on a thread of its own, turning every way it can fail into a result,
+    /// so the run never depends on it, not even on a shadow that blocks before it returns a task.
     /// </summary>
-    private async Task<ShadowResult> AskShadow(Type deciderType, DecisionRequest request)
+    private static Task<ShadowResult> AskShadow(
+        Type deciderType,
+        IDecider shadow,
+        DecisionRequest request,
+        CancellationToken cancellationToken
+    ) =>
+        Task.Run(
+            async () =>
+            {
+                try
+                {
+                    var result = await shadow
+                        .Decide(request, cancellationToken)
+                        .ConfigureAwait(false);
+                    return new ShadowResult(deciderType, result?.Answers, null);
+                }
+                catch (Exception e)
+                {
+                    return new ShadowResult(deciderType, null, $"failed: {e.Message}");
+                }
+            },
+            CancellationToken.None
+        );
+
+    /// <summary>
+    /// Waits at most <paramref name="wait"/> for the shadows still running once the live answer is
+    /// in, then cancels them and reports each one that has not answered as not having answered.
+    /// A shadow is never waited for beyond that, whether or not it honours cancellation.
+    /// </summary>
+    private async Task<IReadOnlyList<ShadowResult>> Settle(
+        List<(Type Decider, Task<ShadowResult> Asked)> shadows,
+        CancellationTokenSource shadowing,
+        TimeSpan wait
+    )
+    {
+        if (shadows.Count == 0)
+            return [];
+
+        var all = Task.WhenAll(shadows.Select(s => s.Asked));
+
+        if (!all.IsCompleted)
+        {
+            using var timer = CancellationTokenSource.CreateLinkedTokenSource(CancellationToken);
+            timer.CancelAfter(wait);
+
+            var gave = new TaskCompletionSource();
+
+            await using (timer.Token.Register(() => gave.TrySetResult()).ConfigureAwait(false))
+                await Task.WhenAny(all, gave.Task).ConfigureAwait(false);
+        }
+
+        Stop(shadowing);
+
+        return shadows
+            .Select(s =>
+                s.Asked.IsCompletedSuccessfully
+                    ? s.Asked.Result
+                    : new ShadowResult(
+                        s.Decider,
+                        null,
+                        $"did not answer within {QuestionSpec.Format(wait.TotalSeconds)}s of the live "
+                            + "decider's answer, "
+                            + "so it was cancelled and not waited for"
+                    )
+            )
+            .ToList();
+    }
+
+    private static void Stop(CancellationTokenSource shadowing)
     {
         try
         {
-            if (Optional(deciderType) is not IDecider shadow)
-                return new(
-                    deciderType,
-                    null,
-                    "is not in Memory or the container, so it was not asked"
-                );
-
-            var result = await shadow.Decide(request, CancellationToken).ConfigureAwait(false);
-            return new(deciderType, result?.Answers, null);
+            shadowing.Cancel();
         }
-        catch (Exception e)
+        catch (ObjectDisposedException)
         {
-            return new(deciderType, null, $"failed: {e.Message}");
+            // Every shadow already finished, and the source went with them.
+        }
+        catch (AggregateException)
+        {
+            // A shadow's own cancellation callback threw. It is the shadow's problem, not the run's.
         }
     }
 
     #endregion
 
     #region Routing
+
+    /// <summary>
+    /// What is wrong with a routing step that asks nothing, beyond its tracks: shadows have
+    /// nothing to be compared on.
+    /// </summary>
+    private static IEnumerable<string> Unasked(TrackSet<TInput, TReturn> set) =>
+        set.ShadowsWithoutAQuestion is { } problem ? [problem] : [];
 
     private static IEnumerable<string> SwitchProblems<TTrack>(
         Tracks<TInput, TReturn, TTrack> tracks
@@ -419,121 +595,98 @@ public partial class Monad<TInput, TReturn>
             ? tracks.Set.Problems.Append("declares no tracks. Add one with When.")
             : tracks.Set.Problems;
 
-    private Task<Monad<TInput, TReturn>> SwitchAsync<TTrack>(
+    private async Task<Monad<TInput, TReturn>> SwitchAsync<TTrack>(
         Tracks<TInput, TReturn, TTrack> tracks,
-        string step
+        string step,
+        IEnumerable<string>? unasked = null
     )
         where TTrack : struct, Enum
     {
         if (Exception is not null)
-            return Task.FromResult(this);
+            return this;
 
-        if (SwitchProblems(tracks).ToList() is { Count: > 0 } problems)
-            return Task.FromResult(Refuse(step, $"{step} {string.Join(" ", problems)}"));
+        CancellationToken.ThrowIfCancellationRequested();
+
+        if (SwitchProblems(tracks).Concat(unasked ?? []).ToList() is { Count: > 0 } problems)
+            return Refuse(step, $"{step} {string.Join(" ", problems)}");
 
         var decision = Decision<ChoiceDecision<TTrack>>(step);
 
         if (decision is null)
-            return Task.FromResult(this);
+            return this;
 
-        var chosen = tracks.Set.Tracks.Find(t => t.Name == decision.Choice.ToString());
-        var required = chosen?.RequireConfidence ?? tracks.MinimumConfidence;
+        var (taken, reason) = tracks.Route(decision);
 
-        var reason =
-            chosen is null ? $"the decision was '{decision.Choice}', which has no track here"
-            : decision.Confidence < required
-                ? $"the decision was '{decision.Choice}' with a confidence of "
-                    + $"{QuestionSpec.Format(decision.Confidence)}, below the "
-                    + $"{QuestionSpec.Format(required)} its track requires"
-            : null;
-
-        return Take<TTrack>(
-            step,
-            reason is null ? chosen : tracks.Set.Fallback,
-            reason,
-            $"{reason}, and it declares no Otherwise track to take instead."
-        );
+        return await Take<TTrack>(
+                step,
+                taken,
+                reason,
+                $"{reason}, and it declares no Otherwise track to take instead."
+            )
+            .ConfigureAwait(false);
     }
 
-    private Task<Monad<TInput, TReturn>> GateAsync<TQuestion>(
+    private async Task<Monad<TInput, TReturn>> GateAsync<TQuestion>(
         GateTracks<TInput, TReturn> gate,
-        string step
+        string step,
+        IEnumerable<string>? unasked = null
     )
     {
         if (Exception is not null)
-            return Task.FromResult(this);
+            return this;
 
-        if (gate.Problems.ToList() is { Count: > 0 } problems)
-            return Task.FromResult(Refuse(step, $"{step} {string.Join(" ", problems)}"));
+        CancellationToken.ThrowIfCancellationRequested();
+
+        if (gate.Problems.Concat(unasked ?? []).ToList() is { Count: > 0 } problems)
+            return Refuse(step, $"{step} {string.Join(" ", problems)}");
 
         var decision = Decision<YesNoDecision<TQuestion>>(step);
 
         if (decision is null)
-            return Task.FromResult(this);
+            return this;
 
         var p = decision.Probability;
 
-        // Unsure is a declared outcome, not a decision overruled, so it carries no fallback reason.
-        var taken =
-            p >= gate.YesAtLeast ? gate.YesTrack
-            : p < gate.NoBelow ? gate.NoTrack
-            : gate.Set.Fallback;
-
-        return Take<TQuestion>(
-            step,
-            taken,
-            null,
-            $"the probability of yes was {QuestionSpec.Format(p)}, between the No bar "
-                + $"({QuestionSpec.Format(gate.NoBelow)}) and the Yes bar "
-                + $"({QuestionSpec.Format(gate.YesAtLeast)}), and it declares no Unsure track."
-        );
+        return await Take<TQuestion>(
+                step,
+                gate.Route(p),
+                null,
+                $"the probability of yes was {QuestionSpec.Format(p)}, between the No bar "
+                    + $"({QuestionSpec.Format(gate.NoBelow)}) and the Yes bar "
+                    + $"({QuestionSpec.Format(gate.YesAtLeast)}), and it declares no Unsure track."
+            )
+            .ConfigureAwait(false);
     }
 
-    private Task<Monad<TInput, TReturn>> ScaleAsync<TLevel>(
+    private async Task<Monad<TInput, TReturn>> ScaleAsync<TLevel>(
         ScaleTracks<TInput, TReturn, TLevel> scale,
-        string step
+        string step,
+        IEnumerable<string>? unasked = null
     )
         where TLevel : struct, Enum
     {
         if (Exception is not null)
-            return Task.FromResult(this);
+            return this;
 
-        if (scale.Problems.ToList() is { Count: > 0 } problems)
-            return Task.FromResult(Refuse(step, $"{step} {string.Join(" ", problems)}"));
+        CancellationToken.ThrowIfCancellationRequested();
+
+        if (scale.Problems.Concat(unasked ?? []).ToList() is { Count: > 0 } problems)
+            return Refuse(step, $"{step} {string.Join(" ", problems)}");
 
         var decision = Decision<ScoreDecision<TLevel>>(step);
 
         if (decision is null)
-            return Task.FromResult(this);
+            return this;
 
-        var reached = EnumMembers<TLevel>.IndexOf(decision.Nearest);
+        var (taken, reason) = scale.Route(decision);
 
-        var band = scale
-            .Set.Tracks.Select(t =>
-                (
-                    Track: t,
-                    Index: EnumMembers<TLevel>.TryParse(t.Name, out var level)
-                        ? EnumMembers<TLevel>.IndexOf(level)
-                        : int.MaxValue
-                )
+        return await Take<TLevel>(
+                step,
+                taken,
+                reason,
+                $"{reason}, and it declares no Otherwise track to take instead."
             )
-            .Where(b => b.Index <= reached)
-            .MaxBy(b => b.Index)
-            .Track;
-
-        var reason =
-            decision.Confidence < scale.MinimumConfidence
-                ? $"the score {QuestionSpec.Format(decision.Score)} came with a confidence of "
-                    + $"{QuestionSpec.Format(decision.Confidence)}, below the "
-                    + $"{QuestionSpec.Format(scale.MinimumConfidence)} this scale requires"
-                : null;
-
-        return Take<TLevel>(
-            step,
-            reason is null ? band : scale.Set.Fallback,
-            reason,
-            $"{reason}, and it declares no Otherwise track to take instead."
-        );
+            .ConfigureAwait(false);
     }
 
     /// <summary>
@@ -546,26 +699,38 @@ public partial class Monad<TInput, TReturn>
         string noTrack
     )
     {
-        var at = $"{step} (train '{Train.GetType().ReadableName()}')";
+        var train = Train.GetType().ReadableName();
+        var at = $"{step} (train '{train}')";
 
         if (taken is null)
             return Refuse(step, $"{at}: {noTrack}");
 
         Memory[typeof(TrackTaken<TKey>)] = new TrackTaken<TKey>(taken.Name, fallbackReason);
 
-        Observe(
-            Optional<IDecisionObserver>(),
-            o =>
-                o.Routed(
-                    new TrackRouted(
-                        Train.GetType().ReadableName(),
-                        Train.ExternalId,
-                        typeof(TKey),
-                        taken.Name,
-                        fallbackReason
-                    )
-                )
-        );
+        var (observer, unresolved) = ResolveObserver();
+
+        if (unresolved is not null)
+            return ObserverFailed(unresolved, step);
+
+        if (observer is not null)
+        {
+            var routed = new TrackRouted(
+                train,
+                Train.ExternalId,
+                typeof(TKey),
+                taken.Name,
+                fallbackReason
+            );
+
+            if (
+                await Tell(observer, (o, ct) => o.Routed(routed, ct), at).ConfigureAwait(false) is
+                { } failed
+            )
+                return ObserverFailed(failed, step);
+        }
+
+        // An observer may have taken a while; a run cancelled meanwhile does not enter the track.
+        CancellationToken.ThrowIfCancellationRequested();
 
         return await taken
             .Body(new MonadTask<TInput, TReturn>(Task.FromResult(this)))
@@ -686,20 +851,85 @@ public partial class Monad<TInput, TReturn>
     private object? Optional(Type type) =>
         Memory.GetValueOrDefault(type) ?? this.ExtractTypeFromServiceProvider(type);
 
-    private static void Observe(IDecisionObserver? observer, Action<IDecisionObserver> tell)
+    /// <summary>
+    /// The decision observer, or null when none is registered, or what resolving it threw.
+    /// </summary>
+    private (IDecisionObserver? Observer, Exception? Failure) ResolveObserver()
     {
-        if (observer is null)
-            return;
-
         try
         {
-            tell(observer);
+            return (Optional<IDecisionObserver>(), null);
+        }
+        catch (Exception e)
+        {
+            return (null, e);
+        }
+    }
+
+    /// <summary>
+    /// Tells the observer, and returns what it threw when that must fail the step: only when the
+    /// observer is <see cref="IDecisionObserver.Required"/>. Anything else it throws is logged and
+    /// ignored, because recording a decision must never change it.
+    /// </summary>
+    private async Task<Exception?> Tell(
+        IDecisionObserver observer,
+        Func<IDecisionObserver, CancellationToken, Task> tell,
+        string at
+    )
+    {
+        try
+        {
+            await tell(observer, CancellationToken).ConfigureAwait(false);
+            return null;
+        }
+        catch (Exception e)
+        {
+            bool required;
+
+            try
+            {
+                required = observer.Required;
+            }
+            catch
+            {
+                // An observer that cannot say whether it is required is treated as one that is.
+                required = true;
+            }
+
+            if (required)
+                return e;
+
+            Warn(
+                $"{at}: the decision observer '{observer.GetType().ReadableName()}' failed and is "
+                    + $"not required, so the run goes on without its record: {e.Message}"
+            );
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// Logs a problem the run carries on past, through the logger factory in Memory or the
+    /// container when there is one.
+    /// </summary>
+    private void Warn(string message)
+    {
+        try
+        {
+            if (Optional<ILoggerFactory>()?.CreateLogger("Trax.Core.Decisions") is { } logger)
+                LogProblem(logger, message, null);
         }
         catch
         {
-            // Recording a decision must never change it, or fail the run that made it.
+            // Logging a problem must not become one.
         }
     }
+
+    private static readonly Action<ILogger, string, Exception?> LogProblem =
+        LoggerMessage.Define<string>(
+            LogLevel.Warning,
+            new EventId(1, "DecisionProblem"),
+            "{Problem}"
+        );
 
     /// <summary>
     /// Fails the run for a decision Trax will not act on. Asking again would get the same answer
@@ -717,14 +947,33 @@ public partial class Monad<TInput, TReturn>
     /// Fails the run with what a decider or replay threw, carrying the step the way a junction's
     /// failure carries its junction. Cancellation passes through unwrapped, as it does there.
     /// </summary>
-    private Monad<TInput, TReturn> Failed(Exception e, string step)
+    /// <param name="e">What was thrown.</param>
+    /// <param name="step">The step it failed.</param>
+    /// <param name="unclassified">The class to record when <paramref name="e"/> carries none.</param>
+    private Monad<TInput, TReturn> Failed(
+        Exception e,
+        string step,
+        FailureClass? unclassified = null
+    )
     {
         if (!(e is OperationCanceledException && CancellationToken.IsCancellationRequested))
-            e.Data["TrainExceptionData"] = ExceptionData(e, step, FailureClassification.Carried(e));
+            e.Data["TrainExceptionData"] = ExceptionData(
+                e,
+                step,
+                FailureClassification.Carried(e) ?? unclassified
+            );
 
         Exception ??= e;
         return this;
     }
+
+    /// <summary>
+    /// Fails the step because a required observer could not record it, or no observer could be
+    /// resolved. Recording again may well work, so unless the exception says otherwise the
+    /// failure is classified transient.
+    /// </summary>
+    private Monad<TInput, TReturn> ObserverFailed(Exception e, string step) =>
+        Failed(e, step, FailureClass.Transient);
 
     private TrainExceptionData ExceptionData(Exception e, string step, FailureClass? failure) =>
         new()

@@ -269,7 +269,11 @@ public class DecisionExampleTests
             .ContainSingle()
             .Which.Questions.Select(q => q.Key)
             .Should()
-            .Equal("ContainsThreat", "Verdict", "Severity");
+            .Equal(
+                QuestionKey.For<ContainsThreat>(),
+                QuestionKey.For<Verdict>(),
+                QuestionKey.For<Severity>()
+            );
     }
 
     [Test]
@@ -350,7 +354,7 @@ public class DecisionExampleTests
             .ContainSingle()
             .Which.Questions.Select(q => q.Key)
             .Should()
-            .Equal("ContainsThreat");
+            .Equal(QuestionKey.For<ContainsThreat>());
     }
 
     [Test]
@@ -389,7 +393,11 @@ public class DecisionExampleTests
         observer
             .Decisions.Select(d => (d.Question.Key, d.Shadows.Single().Agrees))
             .Should()
-            .Equal(("ContainsThreat", true), ("Verdict", false), ("Severity", true));
+            .Equal(
+                (QuestionKey.For<ContainsThreat>(), true),
+                (QuestionKey.For<Verdict>(), false),
+                (QuestionKey.For<Severity>(), true)
+            );
     }
 
     [Test]
@@ -420,7 +428,7 @@ public class DecisionExampleTests
     {
         var decider = new ScriptedDecider().Choose(Underwriting.Decline);
         var replay = new FixedReplay(
-            "Underwriting",
+            QuestionKey.For<Underwriting>(),
             new ChoiceAnswer("Approve") { Model = "jev-1.13.0" }
         );
         var observer = new RecordingObserver();
@@ -444,9 +452,17 @@ public class DecisionExampleTests
 
         public List<TrackRouted> Routings { get; } = [];
 
-        public void Decided(DecisionMade decision) => Decisions.Add(decision);
+        public Task Decided(DecisionMade decision, CancellationToken cancellationToken)
+        {
+            Decisions.Add(decision);
+            return Task.CompletedTask;
+        }
 
-        public void Routed(TrackRouted routing) => Routings.Add(routing);
+        public Task Routed(TrackRouted routing, CancellationToken cancellationToken)
+        {
+            Routings.Add(routing);
+            return Task.CompletedTask;
+        }
     }
 
     /// <summary>

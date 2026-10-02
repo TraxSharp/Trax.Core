@@ -15,7 +15,7 @@ namespace Trax.Core.Decisions
     }
     public sealed class CascadingDecider : Trax.Core.Decisions.IDecider
     {
-        public CascadingDecider(Trax.Core.Decisions.IDecider first, Trax.Core.Decisions.IDecider then, double escalateBelow = 0.8, double unsureAbove = 0.2, double unsureBelow = 0.8) { }
+        public CascadingDecider(Trax.Core.Decisions.IDecider first, Trax.Core.Decisions.IDecider then, double escalateBelow = 0.8, double unsureAbove = 0.2, double unsureBelow = 0.8, Microsoft.Extensions.Logging.ILogger? logger = null) { }
         public System.Threading.Tasks.Task<Trax.Core.Decisions.DecisionResult> Decide(Trax.Core.Decisions.DecisionRequest request, System.Threading.CancellationToken cancellationToken) { }
     }
     public sealed class ChoiceAnswer : Trax.Core.Decisions.Answer, System.IEquatable<Trax.Core.Decisions.ChoiceAnswer>
@@ -47,10 +47,12 @@ namespace Trax.Core.Decisions
     }
     public sealed class DecisionMade : System.IEquatable<Trax.Core.Decisions.DecisionMade>
     {
-        public DecisionMade(string Train, string RunId, Trax.Core.Decisions.Question Question, Trax.Core.Decisions.Answer Answer, System.Type? Decider, bool Replayed, System.Collections.Generic.IReadOnlyList<Trax.Core.Decisions.ShadowAnswer> Shadows) { }
+        public DecisionMade(string Train, string RunId, Trax.Core.Decisions.Question Question, int Occurrence, Trax.Core.Decisions.Answer Answer, System.Type? Decider, bool Replayed, System.Collections.Generic.IReadOnlyList<Trax.Core.Decisions.ShadowAnswer> Shadows, string? ReplayRefused = null) { }
         public Trax.Core.Decisions.Answer Answer { get; init; }
         public System.Type? Decider { get; init; }
+        public int Occurrence { get; init; }
         public Trax.Core.Decisions.Question Question { get; init; }
+        public string? ReplayRefused { get; init; }
         public bool Replayed { get; init; }
         public string RunId { get; init; }
         public System.Collections.Generic.IReadOnlyList<Trax.Core.Decisions.ShadowAnswer> Shadows { get; init; }
@@ -71,7 +73,10 @@ namespace Trax.Core.Decisions
     public sealed class GateTracks<TInput, TReturn>
     {
         public Trax.Core.Decisions.GateTracks<TInput, TReturn> No(System.Func<Trax.Core.Train.MonadTask<TInput, TReturn>, Trax.Core.Train.MonadTask<TInput, TReturn>> then, double below = 0.5) { }
+        public Trax.Core.Decisions.GateTracks<TInput, TReturn> Shadow<TDecider>()
+            where TDecider :  class, Trax.Core.Decisions.IDecider { }
         public Trax.Core.Decisions.GateTracks<TInput, TReturn> Unsure(System.Func<Trax.Core.Train.MonadTask<TInput, TReturn>, Trax.Core.Train.MonadTask<TInput, TReturn>> then) { }
+        public Trax.Core.Decisions.GateTracks<TInput, TReturn> WaitForShadows(System.TimeSpan wait) { }
         public Trax.Core.Decisions.GateTracks<TInput, TReturn> Yes(System.Func<Trax.Core.Train.MonadTask<TInput, TReturn>, Trax.Core.Train.MonadTask<TInput, TReturn>> then, double atLeast = 0.5) { }
     }
     public interface IDecider
@@ -80,8 +85,9 @@ namespace Trax.Core.Decisions
     }
     public interface IDecisionObserver
     {
-        void Decided(Trax.Core.Decisions.DecisionMade decision);
-        void Routed(Trax.Core.Decisions.TrackRouted routing);
+        bool Required { get; }
+        System.Threading.Tasks.Task Decided(Trax.Core.Decisions.DecisionMade decision, System.Threading.CancellationToken cancellationToken);
+        System.Threading.Tasks.Task Routed(Trax.Core.Decisions.TrackRouted routing, System.Threading.CancellationToken cancellationToken);
     }
     public interface IDecisionReplay
     {
@@ -93,6 +99,11 @@ namespace Trax.Core.Decisions
         public string Instructions { get; init; }
         public string Key { get; init; }
     }
+    public static class QuestionKey
+    {
+        public static string For(System.Type type) { }
+        public static string For<T>() { }
+    }
     public sealed class Questions<TState>
     {
         public Trax.Core.Decisions.Questions<TState> Choice<TTrack>(string? asking = null)
@@ -103,6 +114,7 @@ namespace Trax.Core.Decisions
             where TLevel :  struct, System.Enum { }
         public Trax.Core.Decisions.Questions<TState> Shadow<TDecider>()
             where TDecider :  class, Trax.Core.Decisions.IDecider { }
+        public Trax.Core.Decisions.Questions<TState> WaitForShadows(System.TimeSpan wait) { }
         public Trax.Core.Decisions.Questions<TState> YesNo<TQuestion>(string? asking = null, string? yes = null, string? no = null) { }
     }
     public sealed class RuleDecider : Trax.Core.Decisions.IDecider
@@ -121,6 +133,9 @@ namespace Trax.Core.Decisions
         public Trax.Core.Decisions.ScaleTracks<TInput, TReturn, TLevel> AtLeast(TLevel level, System.Func<Trax.Core.Train.MonadTask<TInput, TReturn>, Trax.Core.Train.MonadTask<TInput, TReturn>> then) { }
         public Trax.Core.Decisions.ScaleTracks<TInput, TReturn, TLevel> Otherwise(System.Func<Trax.Core.Train.MonadTask<TInput, TReturn>, Trax.Core.Train.MonadTask<TInput, TReturn>> then) { }
         public Trax.Core.Decisions.ScaleTracks<TInput, TReturn, TLevel> RequireConfidence(double minimum) { }
+        public Trax.Core.Decisions.ScaleTracks<TInput, TReturn, TLevel> Shadow<TDecider>()
+            where TDecider :  class, Trax.Core.Decisions.IDecider { }
+        public Trax.Core.Decisions.ScaleTracks<TInput, TReturn, TLevel> WaitForShadows(System.TimeSpan wait) { }
     }
     public sealed class ScoreAnswer : Trax.Core.Decisions.Answer, System.IEquatable<Trax.Core.Decisions.ScoreAnswer>
     {
@@ -187,6 +202,9 @@ namespace Trax.Core.Decisions
     {
         public Trax.Core.Decisions.Tracks<TInput, TReturn, TTrack> Otherwise(System.Func<Trax.Core.Train.MonadTask<TInput, TReturn>, Trax.Core.Train.MonadTask<TInput, TReturn>> then) { }
         public Trax.Core.Decisions.Tracks<TInput, TReturn, TTrack> RequireConfidence(double minimum) { }
+        public Trax.Core.Decisions.Tracks<TInput, TReturn, TTrack> Shadow<TDecider>()
+            where TDecider :  class, Trax.Core.Decisions.IDecider { }
+        public Trax.Core.Decisions.Tracks<TInput, TReturn, TTrack> WaitForShadows(System.TimeSpan wait) { }
         public Trax.Core.Decisions.Tracks<TInput, TReturn, TTrack> When(TTrack track, System.Func<Trax.Core.Train.MonadTask<TInput, TReturn>, Trax.Core.Train.MonadTask<TInput, TReturn>> then, string? description = null, double? requireConfidence = default) { }
     }
     public sealed class YesNoAnswer : Trax.Core.Decisions.Answer, System.IEquatable<Trax.Core.Decisions.YesNoAnswer>
