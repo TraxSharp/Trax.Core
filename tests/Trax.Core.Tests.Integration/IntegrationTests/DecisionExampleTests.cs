@@ -502,7 +502,10 @@ public class DecisionExampleTests
             _recorded[(decision.Question.Key, decision.Occurrence)] = new RecordedAnswer(
                 decision.Answer,
                 decision.Fingerprint
-            );
+            )
+            {
+                StateHash = decision.StateHash,
+            };
             return Task.CompletedTask;
         }
 

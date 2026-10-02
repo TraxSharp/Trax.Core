@@ -59,6 +59,7 @@ namespace Trax.Core.Decisions
         public bool Replayed { get; init; }
         public string RunId { get; init; }
         public System.Collections.Generic.IReadOnlyList<Trax.Core.Decisions.ShadowAnswer> Shadows { get; init; }
+        public string? StateHash { get; init; }
         public string Train { get; init; }
     }
     public sealed class DecisionRefused : System.IEquatable<Trax.Core.Decisions.DecisionRefused>
@@ -152,6 +153,7 @@ namespace Trax.Core.Decisions
         public RecordedAnswer(Trax.Core.Decisions.Answer Answer, string Fingerprint) { }
         public Trax.Core.Decisions.Answer Answer { get; init; }
         public string Fingerprint { get; init; }
+        public string? StateHash { get; init; }
     }
     public sealed class RuleDecider : Trax.Core.Decisions.IDecider
     {

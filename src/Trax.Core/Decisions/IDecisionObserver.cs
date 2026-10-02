@@ -101,7 +101,9 @@ public sealed record DecisionRefused(
 /// </param>
 /// <param name="ReplayRefused">
 /// Why an answer recorded for this question by an earlier run was not replayed, so the decider
-/// was asked afresh, or null when there was none to refuse.
+/// was asked afresh, or null when there was none to refuse. It says which check refused it: an
+/// answer given to a different asking of the question, one that no longer fits the question, or
+/// one given about a different state (see <see cref="StateHash"/>).
 /// </param>
 public sealed record DecisionMade(
     string Train,
@@ -114,7 +116,27 @@ public sealed record DecisionMade(
     bool Replayed,
     IReadOnlyList<ShadowAnswer> Shadows,
     string? ReplayRefused = null
-);
+)
+{
+    /// <summary>
+    /// The SHA-256, as lower-case hex, of the state the question was asked about: its runtime type
+    /// and the JSON it is written as (<c>JsonSerializerDefaults.Web</c>, as a decider that sends
+    /// the state on writes it), taken before the decider was asked. Null when the state cannot be
+    /// written as JSON.
+    /// </summary>
+    /// <remarks>
+    /// A host that replays stores it with the answer and returns it in
+    /// <see cref="RecordedAnswer.StateHash"/>. An answer is replayed only into an asking whose
+    /// state hashes exactly the same, because a repeated run asks about the state as it is then,
+    /// which may not be the state the answer was given about.
+    ///
+    /// <para>Only the hash leaves the run, never the state. A state with few possible values (a
+    /// yes or no, a small amount) can still be recovered from its hash by trying each value, but
+    /// only by someone who can read where it is recorded, which in a host that records runs
+    /// already holds the run's input.</para>
+    /// </remarks>
+    public string? StateHash { get; init; }
+}
 
 /// <summary>
 /// A shadow decider's answer, which the run never acts on.
@@ -155,7 +177,8 @@ public sealed record TrackRouted(
 /// <remarks>
 /// Optional: found in Memory, then in the container. A host that requeues runs implements it from
 /// what it recorded through <see cref="IDecisionObserver"/>: the
-/// <see cref="DecisionMade.Answer"/> and <see cref="DecisionMade.Fingerprint"/>, keyed by train,
+/// <see cref="DecisionMade.Answer"/>, <see cref="DecisionMade.Fingerprint"/> and
+/// <see cref="DecisionMade.StateHash"/>, keyed by train,
 /// run, <see cref="Question.Key"/> and <see cref="DecisionMade.Occurrence"/>. It is asked once per
 /// question, on the run's path, before the decider, so a lookup should be quick.
 ///
@@ -163,8 +186,13 @@ public sealed record TrackRouted(
 /// question as it is asked now was given to a different asking (the question was reworded, its
 /// options or levels changed, or the chain changed so that another step now asks it first), and
 /// one that no longer fits the question (an option renamed or removed, a scale with fewer levels,
-/// a different kind of question) cannot repeat what the earlier run did. Neither is acted on: the
-/// decider is asked afresh, with the reason in <see cref="DecisionMade.ReplayRefused"/>. A recorded
+/// a different kind of question) cannot repeat what the earlier run did. Nor is one whose
+/// <see cref="RecordedAnswer.StateHash"/> differs from the state asked about now, is null, or
+/// cannot be compared because the state cannot be written as JSON: a repeated run asks about the
+/// state as it is then, which may have changed since, or, in a loop, may be another item asked
+/// about at the same occurrence. None of these is acted on: the decider is asked afresh, with the
+/// reason in <see cref="DecisionMade.ReplayRefused"/>. The check is made here, so every replay
+/// inherits it and an implementation only stores and returns the hash. A recorded
 /// choice of a member the step has no track for is replayed like any other, and takes the
 /// fallback track again, as it did the first time. Shadows are not asked a question whose answer
 /// is replayed.</para>
@@ -196,4 +224,12 @@ public interface IDecisionReplay
 /// <param name="Fingerprint">
 /// The <see cref="DecisionMade.Fingerprint"/> the answer was recorded with, exactly as given.
 /// </param>
-public sealed record RecordedAnswer(Answer Answer, string Fingerprint);
+public sealed record RecordedAnswer(Answer Answer, string Fingerprint)
+{
+    /// <summary>
+    /// The <see cref="DecisionMade.StateHash"/> the answer was recorded with, exactly as given.
+    /// An answer is replayed only when it equals the hash of the state asked about now, so one
+    /// left null, such as an answer recorded before states were hashed, is never replayed.
+    /// </summary>
+    public string? StateHash { get; init; }
+}
