@@ -101,7 +101,9 @@ public partial class Monad<TInput, TReturn>
             );
         }
 
-        return new(AskThen(question, step, m => m.SwitchAsync(declared, step)));
+        return new(
+            AskThen(question, step, SwitchProblems(declared), m => m.SwitchAsync(declared, step))
+        );
     }
 
     /// <summary>
@@ -161,7 +163,9 @@ public partial class Monad<TInput, TReturn>
             );
         }
 
-        return new(AskThen(question, step, m => m.GateAsync<TQuestion>(declared, step)));
+        return new(
+            AskThen(question, step, declared.Problems, m => m.GateAsync<TQuestion>(declared, step))
+        );
     }
 
     /// <summary>
@@ -182,9 +186,9 @@ public partial class Monad<TInput, TReturn>
                 step,
                 typeof(ScoreDecision<TLevel>),
                 declared.Set,
-                declared.Problems.Concat(Unasked(declared.Set))
+                declared.Problems.Concat(UnaskedScale(declared))
             )
-            : new(ScaleAsync(declared, step, Unasked(declared.Set)));
+            : new(ScaleAsync(declared, step, UnaskedScale(declared)));
     }
 
     /// <summary>
@@ -222,19 +226,27 @@ public partial class Monad<TInput, TReturn>
             );
         }
 
-        return new(AskThen(question, step, m => m.ScaleAsync(declared, step)));
+        return new(AskThen(question, step, declared.Problems, m => m.ScaleAsync(declared, step)));
     }
 
     #endregion
 
     #region Asking
 
+    /// <summary>
+    /// Asks a routing step's own question, then routes on the answer. The tracks are checked
+    /// first, so a declaration the startup check refuses never costs a decision.
+    /// </summary>
     private async Task<Monad<TInput, TReturn>> AskThen<TState>(
         Questions<TState> question,
         string step,
+        IEnumerable<string> trackProblems,
         Func<Monad<TInput, TReturn>, Task<Monad<TInput, TReturn>>> route
     )
     {
+        if (Exception is null && trackProblems.ToList() is { Count: > 0 } problems)
+            return Refuse(step, $"{step} {string.Join(" ", problems)}");
+
         var monad = await DecideAsync(question, step).ConfigureAwait(false);
         return await route(monad).ConfigureAwait(false);
     }
@@ -586,6 +598,19 @@ public partial class Monad<TInput, TReturn>
     /// </summary>
     private static IEnumerable<string> Unasked(TrackSet<TInput, TReturn> set) =>
         set.ShadowsWithoutAQuestion is { } problem ? [problem] : [];
+
+    /// <summary>
+    /// What is wrong with a <c>Scale</c> that asks nothing: as for any routing step, and a scale
+    /// too short to have been scored, which no question of its own reports.
+    /// </summary>
+    private static IEnumerable<string> UnaskedScale<TLevel>(
+        ScaleTracks<TInput, TReturn, TLevel> scale
+    )
+        where TLevel : struct, Enum =>
+        Unasked(scale.Set)
+            .Concat(
+                ScaleTracks<TInput, TReturn, TLevel>.TooFewLevels is { } problem ? [problem] : []
+            );
 
     private static IEnumerable<string> SwitchProblems<TTrack>(
         Tracks<TInput, TReturn, TTrack> tracks

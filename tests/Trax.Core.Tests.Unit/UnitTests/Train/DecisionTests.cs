@@ -188,11 +188,74 @@ public class DecisionTests : TestSetup
             "has no track from its lowest level, 'Low'"
         );
         yield return Case(
+            "ATrackOnAValueTheEnumDoesNotDefine",
+            t => t.Switch<string, Lane>(s => s.When(Lane.Left, l => l).When((Lane)7, l => l)),
+            "declares a track for '7', which is not a member of 'Lane'"
+        );
+        yield return Case(
+            "ATrackOnAValueTheEnumDoesNotDefine_InASwitchThatAsksNothing",
+            t =>
+                t.Decide<string>(q => q.Choice<Lane>())
+                    .Switch<Lane>(s => s.When(Lane.Left, l => l).When((Lane)7, l => l)),
+            "declares a track for '7', which is not a member of 'Lane'"
+        );
+        yield return Case(
+            "AScaleTrackOnAValueTheEnumDoesNotDefine",
+            t =>
+                t.Scale<string, Level>(s => s.AtLeast(Level.Low, l => l).AtLeast((Level)9, l => l)),
+            "declares a track for '9', which is not a member of 'Level'"
+        );
+        yield return Case(
+            "AScaleOnAnEnumWithNoMembers",
+            t => t.Scale<string, NoLevels>(s => s),
+            "rates on 'NoLevels', which has fewer than two levels"
+        );
+        yield return Case(
+            "AScaleThatAsksNothingOnAnEnumWithNoMembers",
+            t => t.Scale<NoLevels>(s => s),
+            "routes on 'NoLevels', which has fewer than two levels"
+        );
+        yield return Case(
+            "AScaleThatAsksNothingOnAnEnumWithOneMember",
+            t => t.Scale<OneLevel>(s => s.AtLeast(OneLevel.Only, o => o)),
+            "routes on 'OneLevel', which has fewer than two levels"
+        );
+        yield return Case(
             "ATrackNamingSomethingNotAJunction",
             t => t.Switch<string, Lane>(s => s.When(Lane.Left, l => l.Chain<NotAJunction>())),
             "track 'Left': Chain names NotAJunction"
         );
     }
+
+    [Test]
+    public async Task Run_ATrackOnAValueTheEnumDoesNotDefine_IsRefusedBeforeTheDeciderIsAsked()
+    {
+        var decider = new ScriptedDecider().Choose(Lane.Left);
+
+        var failure = Failure(
+            await Train(
+                    t =>
+                        t.Switch<string, Lane>(s =>
+                            s.When(Lane.Left, l => l.Chain<StringToBool>())
+                                .When((Lane)7, l => l.Chain<StringToBool>())
+                        ),
+                    decider
+                )
+                .RunEither("x")
+        );
+
+        failure.Message.Should().Contain("'7', which is not a member of 'Lane'");
+        decider.Requests.Should().BeEmpty("a question offering the wrong option is never asked");
+    }
+
+    [Test]
+    public async Task Run_AScaleThatAsksNothingOnAnEnumWithNoMembers_IsRefusedNotThrown() =>
+        Failure(
+            await Train(t => t.Scale<NoLevels>(s => s.Otherwise(o => o.Chain<StringToBool>())))
+                .RunEither("x")
+        )
+            .Message.Should()
+            .Contain("fewer than two levels");
 
     [Test]
     public void DeclaredChain_AsksNoDeciderAndRunsNoTrack()
@@ -459,6 +522,15 @@ public class DecisionTests : TestSetup
     public enum Unasked
     {
         A,
+    }
+
+    [Asks("Where on nothing?")]
+    public enum NoLevels { }
+
+    [Asks("Where on one level?")]
+    public enum OneLevel
+    {
+        Only,
     }
 
     [Asks("Is the flag up?")]

@@ -1,4 +1,5 @@
 using Trax.Core.Train;
+using Trax.Core.Utils;
 
 namespace Trax.Core.Decisions;
 
@@ -58,6 +59,17 @@ internal sealed class TrackSet<TInput, TReturn>
                 + "Confidence is a probability."
             : null;
 
+    /// <summary>
+    /// The refusal for a track declared on a value <typeparamref name="TEnum"/> does not define,
+    /// such as <c>(Lane)7</c>. No answer can name it, and offering it would offer something else.
+    /// </summary>
+    public static string? NotAMember<TEnum>(TEnum value)
+        where TEnum : struct, Enum =>
+        Enum.IsDefined(value)
+            ? null
+            : $"declares a track for '{value}', which is not a member of "
+                + $"'{typeof(TEnum).ReadableName()}'. Declare tracks on its members.";
+
     /// <summary>Every track, with the fallback last.</summary>
     public IEnumerable<DeclaredTrack<TInput, TReturn>> All =>
         Fallback is null ? Tracks : Tracks.Append(Fallback);
@@ -112,6 +124,9 @@ public sealed class Tracks<TInput, TReturn, TTrack>
     {
         if (TrackSet<TInput, TReturn>.ConfidenceProblem(requireConfidence) is { } problem)
             Set.Problems.Add($"track '{track}' {problem}");
+
+        if (TrackSet<TInput, TReturn>.NotAMember(track) is { } undefined)
+            Set.Problems.Add(undefined);
 
         Set.Add(
             new DeclaredTrack<TInput, TReturn>(
@@ -350,16 +365,35 @@ public sealed class ScaleTracks<TInput, TReturn, TLevel>
 
     internal double MinimumConfidence { get; private set; }
 
-    internal IEnumerable<string> Problems =>
-        Set.Problems.Concat(
-            Set.Tracks.Any(t => t.Name == EnumMembers<TLevel>.Ordered[0].ToString())
-                ? []
-                :
-                [
-                    $"has no track from its lowest level, '{EnumMembers<TLevel>.Ordered[0]}', so "
-                        + "a low score has nowhere to go. Declare AtLeast for it.",
-                ]
-        );
+    internal IEnumerable<string> Problems
+    {
+        get
+        {
+            foreach (var problem in Set.Problems)
+                yield return problem;
+
+            // An enum with no members has no lowest level; TooFewLevels reports it.
+            if (EnumMembers<TLevel>.Ordered.Count == 0)
+                yield break;
+
+            var lowest = EnumMembers<TLevel>.Ordered[0];
+
+            if (!Set.Tracks.Any(t => t.Name == lowest.ToString()))
+                yield return $"has no track from its lowest level, '{lowest}', so a low score has "
+                    + "nowhere to go. Declare AtLeast for it.";
+        }
+    }
+
+    /// <summary>
+    /// The refusal for a scale on fewer than two levels, which no score can place anything on. The
+    /// form that asks its own question reports it through the question instead, so it is said
+    /// once.
+    /// </summary>
+    internal static string? TooFewLevels =>
+        EnumMembers<TLevel>.Ordered.Count < 2
+            ? $"routes on '{typeof(TLevel).ReadableName()}', which has fewer than two levels, so "
+                + "no score can be placed on it."
+            : null;
 
     /// <summary>
     /// Also puts this step's question to <typeparamref name="TDecider"/>, and records whether it
@@ -429,6 +463,9 @@ public sealed class ScaleTracks<TInput, TReturn, TLevel>
         Func<MonadTask<TInput, TReturn>, MonadTask<TInput, TReturn>> then
     )
     {
+        if (TrackSet<TInput, TReturn>.NotAMember(level) is { } undefined)
+            Set.Problems.Add(undefined);
+
         Set.Add(new DeclaredTrack<TInput, TReturn>(level.ToString(), null, then, null));
         return this;
     }
