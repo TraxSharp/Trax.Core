@@ -28,7 +28,7 @@ public sealed class AsksAttribute(string question) : Attribute
 /// <param name="Choice">The chosen member.</param>
 /// <param name="Confidence">How sure the decider was, from 0 to 1.</param>
 /// <param name="Probabilities">Each member's probability, when the decider gave them.</param>
-/// <param name="Model">The model and version that decided, or null for one that is not a model.</param>
+/// <param name="Model">The model that decided, as the decider named it, or null for one that is not a model.</param>
 public sealed record ChoiceDecision<TTrack>(
     TTrack Choice,
     double Confidence,
@@ -45,7 +45,7 @@ public sealed record ChoiceDecision<TTrack>(
 /// <param name="Nearest">The level the score rounds to.</param>
 /// <param name="Confidence">How sure the decider was, from 0 to 1.</param>
 /// <param name="Probabilities">Each level's probability, when the decider gave them.</param>
-/// <param name="Model">The model and version that decided, or null for one that is not a model.</param>
+/// <param name="Model">The model that decided, as the decider named it, or null for one that is not a model.</param>
 public sealed record ScoreDecision<TLevel>(
     double Score,
     TLevel Nearest,
@@ -64,7 +64,7 @@ public sealed record ScoreDecision<TLevel>(
 /// by type, so each yes/no question a train asks needs its own.
 /// </typeparam>
 /// <param name="Probability">The probability of yes, from 0 to 1.</param>
-/// <param name="Model">The model and version that decided, or null for one that is not a model.</param>
+/// <param name="Model">The model that decided, as the decider named it, or null for one that is not a model.</param>
 public sealed record YesNoDecision<TQuestion>(double Probability, string? Model);
 
 /// <summary>

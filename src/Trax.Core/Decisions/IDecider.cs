@@ -96,7 +96,7 @@ public sealed record DecisionResult(IReadOnlyDictionary<string, Answer> Answers)
 /// </summary>
 public abstract record Answer
 {
-    /// <summary>The model and version that answered, or null for a decider that is not a model.</summary>
+    /// <summary>The model that answered, as the decider named it, or null for a decider that is not a model.</summary>
     public string? Model { get; init; }
 }
 
