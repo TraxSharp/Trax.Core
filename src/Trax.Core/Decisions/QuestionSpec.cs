@@ -41,7 +41,8 @@ internal abstract class QuestionSpec
     /// decider. When the step routes on the question, that means taking the same track, by the
     /// step's own bars and bands. A plain <c>Decide</c> knows nothing of the routing after it, so it
     /// compares the answers themselves (<see cref="SameAnswer"/>). A shadow answer that does not fit
-    /// the question never agrees.
+    /// the question never agrees, and neither does one when the live answer has no track to take:
+    /// two answers that both fail the run did not agree on anything the run did.
     /// </summary>
     public bool SameOutcome(Answer live, Answer shadow)
     {
@@ -59,7 +60,7 @@ internal abstract class QuestionSpec
         }
 
         return Route is { } route
-            ? route(liveDecision) == route(shadowDecision)
+            ? route(liveDecision) is { } track && track == route(shadowDecision)
             : SameAnswer(liveDecision, shadowDecision);
     }
 

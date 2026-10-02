@@ -250,6 +250,52 @@ public class DecisionRuntimeTests : TestSetup
     }
 
     [Test]
+    public async Task ShadowAgreement_OnAGateWithNoUnsureTrack_InTheBand_IsNotAgreement()
+    {
+        var observer = new RecordingObserver();
+
+        var result = await Run(
+            t =>
+                t.Gate<string, Flag>(g =>
+                        g.Yes(y => y, atLeast: 0.7).No(n => n, below: 0.3).Shadow<IShadow>()
+                    )
+                    .Chain<StringToBool>(),
+            Shadowed(
+                new ScriptedDecider().YesNo<Flag>(0.5),
+                new ScriptedDecider().YesNo<Flag>(0.6),
+                observer
+            )
+        );
+
+        result.IsLeft.Should().BeTrue("the live answer has no track to take");
+        observer
+            .Decisions.Single()
+            .Shadows.Single()
+            .Agrees.Should()
+            .BeFalse("both answers failing the run is not agreeing on a track");
+    }
+
+    [Test]
+    public async Task ShadowAgreement_OnASwitch_ChoosingAMemberWithNoTrackAndNoOtherwise_IsNotAgreement()
+    {
+        var observer = new RecordingObserver();
+
+        var result = await Run(
+            t =>
+                t.Switch<string, Lane>(s => s.When(Lane.Left, l => l).Shadow<IShadow>())
+                    .Chain<StringToBool>(),
+            Shadowed(
+                new ScriptedDecider().Choose(Lane.Right),
+                new ScriptedDecider().Choose(Lane.Right),
+                observer
+            )
+        );
+
+        result.IsLeft.Should().BeTrue("Right has no track and there is no Otherwise");
+        observer.Decisions.Single().Shadows.Single().Agrees.Should().BeFalse();
+    }
+
+    [Test]
     public async Task ShadowAgreement_ForAPlainDecide_ComparesTheAnswers()
     {
         var observer = new RecordingObserver();
