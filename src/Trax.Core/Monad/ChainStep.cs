@@ -75,8 +75,11 @@ public readonly record struct ChainStep(ChainStepKind Kind, Type? Junction, Type
 /// </summary>
 /// <remarks>
 /// A monad carrying a recorder answers every chain call by writing the call's type arguments
-/// here and returning immediately. Nothing is resolved from the container and no junction runs,
-/// so reading a chain is safe to do at host startup for every registered train.
+/// here and returning immediately. No junction runs and no junction is resolved, so reading a
+/// chain is safe to do at host startup for every registered train. The one thing looked up is each
+/// decider a decision step names, so one that vets questions
+/// (<see cref="Trax.Core.Decisions.IVetsQuestions"/>) can refuse what it cannot answer; none is
+/// asked to decide.
 /// </remarks>
 public sealed class ChainRecorder
 {

@@ -24,7 +24,7 @@ namespace Trax.Core.Decisions;
 /// escalated. A switch's own confidence bars and fallback tracks still apply to whatever answer
 /// the cascade returns, which is how a person ends up as the third tier.</para>
 /// </remarks>
-public sealed class CascadingDecider : IDecider
+public sealed class CascadingDecider : IDecider, IVetsQuestions
 {
     private readonly IDecider _first;
     private readonly IDecider _then;
@@ -125,6 +125,16 @@ public sealed class CascadingDecider : IDecider
 
         return new DecisionResult(answers);
     }
+
+    /// <summary>
+    /// What either tier finds wrong with the questions, when it vets questions: any question may be
+    /// put to the first tier, and any to the second.
+    /// </summary>
+    public IEnumerable<string> Problems(DeclaredQuestions declared) =>
+        new[] { _first, _then }
+            .OfType<IVetsQuestions>()
+            .SelectMany(tier => tier.Problems(declared) ?? [])
+            .Distinct();
 
     // Written so that NaN, which compares false with everything, counts as unsure.
     private bool IsUnsure(Answer answer) =>

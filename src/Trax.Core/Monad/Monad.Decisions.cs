@@ -1056,7 +1056,92 @@ public partial class Monad<TInput, TReturn>
         foreach (var shadow in questions.Shadows)
             recorder.RecordRequirement(first, shadow);
 
+        Vet(questions, step, first);
+
         return new MonadTask<TInput, TReturn>(Task.FromResult(this));
+    }
+
+    /// <summary>
+    /// Asks each decider the step names, the live one and its shadows, that can be found without
+    /// running anything and that vets questions (<see cref="IVetsQuestions"/>), whether it can
+    /// answer what the step declares, and refuses the step for each problem it names.
+    /// </summary>
+    /// <remarks>
+    /// A decider is found as the run finds it, among the services handed to <c>AddServices</c> and
+    /// then in the train's container, and is never asked to decide. One the container cannot build
+    /// here, because only a request can, say, is left to refuse at run time what it cannot answer;
+    /// one nothing supplies is reported by verification.
+    /// </remarks>
+    private void Vet<TState>(Questions<TState> questions, string step, int first)
+    {
+        DeclaredQuestions declared;
+
+        try
+        {
+            declared = new DeclaredQuestions(
+                Train.GetType().ReadableName(),
+                step,
+                typeof(TState),
+                questions.Specs.Select(s => s.ToQuestion()).ToList()
+            );
+        }
+        catch
+        {
+            // A question that cannot be put together is already refused for what is wrong with it.
+            return;
+        }
+
+        if (declared.Questions.Count == 0)
+            return;
+
+        var deciders = questions
+            .Shadows.Select(s => (Type: s, Role: "shadow decider"))
+            .Prepend((Type: questions.Decider, Role: "decider"));
+
+        foreach (var (type, role) in deciders)
+        {
+            IVetsQuestions? vetter;
+
+            try
+            {
+                vetter =
+                    (
+                        Memory.GetValueOrDefault(type)
+                        ?? (
+                            Memory.GetValueOrDefault(typeof(IServiceProvider)) as IServiceProvider
+                        )?.GetService(type)
+                    ) as IVetsQuestions;
+            }
+            catch
+            {
+                continue;
+            }
+
+            if (vetter is null)
+                continue;
+
+            List<string> problems;
+
+            try
+            {
+                problems = (vetter.Problems(declared) ?? [])
+                    .Where(p => !string.IsNullOrWhiteSpace(p))
+                    .ToList();
+            }
+            catch (Exception e)
+            {
+                problems = [$"failed while vetting the questions: {e.Message}"];
+            }
+
+            foreach (var problem in problems)
+                Recorder!.RefuseRecordedStep(
+                    first,
+                    ChainStepKind.Decide,
+                    type,
+                    $"{step}: the {role} '{vetter.GetType().ReadableName()}' cannot answer it: "
+                        + problem
+                );
+        }
     }
 
     private MonadTask<TInput, TReturn> RecordRouting<TKey>(

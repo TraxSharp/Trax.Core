@@ -14,10 +14,11 @@ namespace Trax.Core.Decisions
         public string Question { get; }
         public string? Yes { get; init; }
     }
-    public sealed class CascadingDecider : Trax.Core.Decisions.IDecider
+    public sealed class CascadingDecider : Trax.Core.Decisions.IDecider, Trax.Core.Decisions.IVetsQuestions
     {
         public CascadingDecider(Trax.Core.Decisions.IDecider first, Trax.Core.Decisions.IDecider then, double escalateBelow = 0.8, double unsureAbove = 0.2, double unsureBelow = 0.8, Microsoft.Extensions.Logging.ILogger? logger = null) { }
         public System.Threading.Tasks.Task<Trax.Core.Decisions.DecisionResult> Decide(Trax.Core.Decisions.DecisionRequest request, System.Threading.CancellationToken cancellationToken) { }
+        public System.Collections.Generic.IEnumerable<string> Problems(Trax.Core.Decisions.DeclaredQuestions declared) { }
     }
     public sealed class ChoiceAnswer : Trax.Core.Decisions.Answer, System.IEquatable<Trax.Core.Decisions.ChoiceAnswer>
     {
@@ -84,6 +85,14 @@ namespace Trax.Core.Decisions
         public DecisionResult(System.Collections.Generic.IReadOnlyDictionary<string, Trax.Core.Decisions.Answer> Answers) { }
         public System.Collections.Generic.IReadOnlyDictionary<string, Trax.Core.Decisions.Answer> Answers { get; init; }
     }
+    public sealed class DeclaredQuestions : System.IEquatable<Trax.Core.Decisions.DeclaredQuestions>
+    {
+        public DeclaredQuestions(string Train, string Step, System.Type State, System.Collections.Generic.IReadOnlyList<Trax.Core.Decisions.Question> Questions) { }
+        public System.Collections.Generic.IReadOnlyList<Trax.Core.Decisions.Question> Questions { get; init; }
+        public System.Type State { get; init; }
+        public string Step { get; init; }
+        public string Train { get; init; }
+    }
     public sealed class GateTracks<TInput, TReturn>
     {
         public Trax.Core.Decisions.GateTracks<TInput, TReturn> No(System.Func<Trax.Core.Train.MonadTask<TInput, TReturn>, Trax.Core.Train.MonadTask<TInput, TReturn>> then, double below = 0.5) { }
@@ -107,6 +116,10 @@ namespace Trax.Core.Decisions
     public interface IDecisionReplay
     {
         System.Threading.Tasks.Task<Trax.Core.Decisions.RecordedAnswer?> Replay(string train, string runId, string key, int occurrence, System.Threading.CancellationToken cancellationToken);
+    }
+    public interface IVetsQuestions
+    {
+        System.Collections.Generic.IEnumerable<string> Problems(Trax.Core.Decisions.DeclaredQuestions declared);
     }
     public abstract class Question : System.IEquatable<Trax.Core.Decisions.Question>
     {

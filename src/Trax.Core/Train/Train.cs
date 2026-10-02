@@ -151,7 +151,10 @@ public abstract class Train<TInput, TReturn> : IRoute<TInput, TReturn>
     /// </summary>
     /// <remarks>
     /// Every chain call answers by recording its type arguments, so the result is the sequence
-    /// of types the train declares. Nothing touches the container and no junction executes.
+    /// of types the train declares. No junction is resolved or executes. The container is asked only
+    /// for each decider a decision step names, so one that vets questions
+    /// (<see cref="Trax.Core.Decisions.IVetsQuestions"/>) can refuse what it cannot answer; none is asked to
+    /// decide.
     ///
     /// <para><c>Junctions()</c> itself does run, which is why it has to be a pure declaration. A
     /// body that awaits before returning, or that returns a result instead of ending in
