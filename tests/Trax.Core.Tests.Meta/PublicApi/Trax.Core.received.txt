@@ -55,6 +55,7 @@ namespace Trax.Core.Decisions
         public string Fingerprint { get; init; }
         public int Occurrence { get; init; }
         public Trax.Core.Decisions.Question Question { get; init; }
+        public System.Type? QuestionType { get; init; }
         public string? ReplayRefused { get; init; }
         public bool Replayed { get; init; }
         public string RunId { get; init; }
@@ -70,6 +71,7 @@ namespace Trax.Core.Decisions
         public string Fingerprint { get; init; }
         public int Occurrence { get; init; }
         public Trax.Core.Decisions.Question Question { get; init; }
+        public System.Type? QuestionType { get; init; }
         public string Reason { get; init; }
         public string RunId { get; init; }
         public string Train { get; init; }

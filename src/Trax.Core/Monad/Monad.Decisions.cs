@@ -311,33 +311,20 @@ public partial class Monad<TInput, TReturn>
             s => QuestionFingerprint.Of(step, typeof(TState), questionsAsked[s.Key])
         );
 
-        // The state written to JSON once, on first need and before the decider or any step after
-        // this one can change it: read back for each shadow, and hashed so a replayed answer is
-        // acted on only for the state it was given about. A state that cannot be written has no
-        // hash, so nothing recorded for it is replayed; that is never the run's failure.
-        byte[]? snapshot = null;
+        // The state hashed once, on first need and before the decider or any step after this one
+        // can change it, so a replayed answer is acted on only for the state it was given about.
+        // A state that cannot be hashed has no hash, so nothing recorded for it is replayed; that
+        // is never the run's failure.
         string? stateHash = null;
-        string? unwritten = null;
-        var written = false;
+        var hashed = false;
 
-        void Write()
+        void HashState()
         {
-            if (written)
+            if (hashed)
                 return;
 
-            written = true;
-
-            try
-            {
-                snapshot = StateCopy.Snapshot(state!);
-                stateHash = StateCopy.Hash(snapshot, state!.GetType());
-            }
-            catch (Exception e)
-            {
-                snapshot = null;
-                stateHash = null;
-                unwritten = e.Message;
-            }
+            hashed = true;
+            stateHash = StateDigest.Of(state);
         }
 
         try
@@ -383,9 +370,9 @@ public partial class Monad<TInput, TReturn>
                 // An answer is about the state it was given for. A retry runs every step again,
                 // so the state asked about now may not be that one: the data changed in between,
                 // or a loop met its items in another order. Only an exact match is replayed.
-                Write();
+                HashState();
 
-                if (StateProblem(spec.Key, earlier.StateHash, stateHash, unwritten) is { } differs)
+                if (StateProblem(spec.Key, earlier.StateHash, stateHash) is { } differs)
                 {
                     replayRefused[spec.Key] = differs;
                     Warn($"{at}: {differs}. The decider is asked afresh.");
@@ -473,14 +460,27 @@ public partial class Monad<TInput, TReturn>
                 pending.Select(s => questionsAsked[s.Key]).ToList()
             );
 
-            // Written before the live decider is asked, so the hash an observer records is of
-            // the state the decider was given, and read back separately for each shadow on its
-            // own thread, so no shadow shares an object with the run or with another shadow. A
-            // state that cannot be written is every shadow's problem, never the run's.
-            if (observer is not null || shadowDeciders.Any(s => s.Shadow is not null))
-                Write();
+            // Hashed before the live decider is asked, so the hash an observer records is of the
+            // state the decider was given.
+            if (observer is not null)
+                HashState();
 
-            var uncopied = unwritten is null ? null : Uncopied(unwritten);
+            // Written once, here, before the live decider or any step after this one can change
+            // the state, and read back separately for each shadow on its own thread, so no shadow
+            // shares an object with the run or with another shadow. A state that cannot be
+            // written is every shadow's problem, never the run's.
+            byte[]? snapshot = null;
+            string? uncopied = null;
+
+            if (shadowDeciders.Any(s => s.Shadow is not null))
+                try
+                {
+                    snapshot = StateCopy.Snapshot(state!);
+                }
+                catch (Exception e)
+                {
+                    uncopied = Uncopied(e.Message);
+                }
 
             // Disposed when this step is done with the shadows, whether they finished or not, so
             // a shadow that never returns does not keep a registration on the run's token.
@@ -569,7 +569,10 @@ public partial class Monad<TInput, TReturn>
                         answer,
                         deciderType!,
                         $"the decider {reason}"
-                    );
+                    )
+                    {
+                        QuestionType = spec.On,
+                    };
 
                     // The step fails on the refusal either way, so an observer that cannot record
                     // it is only logged: its failure would hide why the step failed.
@@ -642,6 +645,7 @@ public partial class Monad<TInput, TReturn>
             )
             {
                 StateHash = stateHash,
+                QuestionType = spec.On,
             };
 
             if (
@@ -740,18 +744,15 @@ public partial class Monad<TInput, TReturn>
     /// and are equal, so an answer recorded before states were hashed, or a state that cannot be
     /// written, is asked afresh rather than assumed to match.
     /// </summary>
-    private static string? StateProblem(
-        string key,
-        string? recorded,
-        string? current,
-        string? unwritten
-    ) =>
+    private static string? StateProblem(string key, string? recorded, string? current) =>
         recorded is null
             ? $"the answer recorded for '{key}' was recorded without a hash of the state it was "
                 + "given about, so it cannot be shown to be about the state as it is now"
         : current is null
             ? $"the answer recorded for '{key}' cannot be shown to be about the state as it is "
-                + $"now, because the state cannot be written as JSON to be compared: {unwritten}"
+                + "now, because the state cannot be hashed to compare it: it holds a cycle, a "
+                + "delegate, a handle or something else that cannot be read the same way every "
+                + "time, or is too large or too deep"
         : !string.Equals(recorded, current, StringComparison.Ordinal)
             ? $"the answer recorded for '{key}' was given about a different state from the one "
                 + "it is asked about now"

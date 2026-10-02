@@ -74,7 +74,20 @@ public sealed record DecisionRefused(
     Answer? Answer,
     Type Decider,
     string Reason
-);
+)
+{
+    /// <summary>
+    /// The type the question was asked about: the enum a choice or score is between, or the marker
+    /// type a yes or no question is about. Its <see cref="Question.Key"/> is derived from it (see
+    /// <see cref="QuestionKey.For(Type)"/>). Null only on a record built outside a run.
+    /// </summary>
+    /// <remarks>
+    /// Given so a host can treat questions by type rather than by key, for instance to keep
+    /// answers about a sensitive type out of a journal, matching it with inheritance
+    /// (<see cref="Type.IsAssignableTo(Type)"/>) where a key would only match one name.
+    /// </remarks>
+    public Type? QuestionType { get; init; }
+}
 
 /// <summary>
 /// One answered question.
@@ -119,10 +132,14 @@ public sealed record DecisionMade(
 )
 {
     /// <summary>
-    /// The SHA-256, as lower-case hex, of the state the question was asked about: its runtime type
-    /// and the JSON it is written as (<c>JsonSerializerDefaults.Web</c>, as a decider that sends
-    /// the state on writes it), taken before the decider was asked. Null when the state cannot be
-    /// written as JSON.
+    /// The SHA-256, as lower-case hex, of the state the question was asked about, taken before the
+    /// decider was asked. It covers every instance field of the state's runtime type, public or
+    /// not (so auto-properties, tuple items, record members and a derived type's members held where
+    /// a base type is declared all count), and every value they hold, recursively, because an
+    /// in-process decider can read all of them. Null when the state cannot be read the same way
+    /// every time: it holds a reference cycle, a delegate, a pointer or handle, a type or member, a
+    /// stream, task or thread, a field whose read throws, or is nested deeper than 64 or larger
+    /// than the hash allows.
     /// </summary>
     /// <remarks>
     /// A host that replays stores it with the answer and returns it in
@@ -136,6 +153,18 @@ public sealed record DecisionMade(
     /// already holds the run's input.</para>
     /// </remarks>
     public string? StateHash { get; init; }
+
+    /// <summary>
+    /// The type the question was asked about: the enum a choice or score is between, or the marker
+    /// type a yes or no question is about. Its <see cref="Question.Key"/> is derived from it (see
+    /// <see cref="QuestionKey.For(Type)"/>). Null only on a record built outside a run.
+    /// </summary>
+    /// <remarks>
+    /// Given so a host can treat questions by type rather than by key, for instance to keep
+    /// answers about a sensitive type out of a journal, matching it with inheritance
+    /// (<see cref="Type.IsAssignableTo(Type)"/>) where a key would only match one name.
+    /// </remarks>
+    public Type? QuestionType { get; init; }
 }
 
 /// <summary>
@@ -188,7 +217,7 @@ public sealed record TrackRouted(
 /// one that no longer fits the question (an option renamed or removed, a scale with fewer levels,
 /// a different kind of question) cannot repeat what the earlier run did. Nor is one whose
 /// <see cref="RecordedAnswer.StateHash"/> differs from the state asked about now, is null, or
-/// cannot be compared because the state cannot be written as JSON: a repeated run asks about the
+/// cannot be compared because the state cannot be hashed: a repeated run asks about the
 /// state as it is then, which may have changed since, or, in a loop, may be another item asked
 /// about at the same occurrence. None of these is acted on: the decider is asked afresh, with the
 /// reason in <see cref="DecisionMade.ReplayRefused"/>. The check is made here, so every replay

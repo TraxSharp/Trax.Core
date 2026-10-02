@@ -1,7 +1,5 @@
 using System.Collections.Concurrent;
 using System.Reflection;
-using System.Security.Cryptography;
-using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using System.Text.Json.Serialization.Metadata;
@@ -12,8 +10,7 @@ namespace Trax.Core.Decisions;
 /// <summary>
 /// The copy of a decision's state each shadow is handed: written to JSON once per asking and read
 /// back separately for each shadow, so no shadow shares an object with the run or with another
-/// shadow. The same JSON is hashed for <see cref="DecisionMade.StateHash"/>, so a replay compares
-/// the state as a decider that sends it on would see it.
+/// shadow.
 /// </summary>
 /// <remarks>
 /// It is written with the options the System One adapter writes a state with
@@ -30,25 +27,6 @@ internal static class StateCopy
     /// <summary>The state written once, to be read back for each shadow.</summary>
     public static byte[] Snapshot(object state) =>
         JsonSerializer.SerializeToUtf8Bytes(state, state.GetType(), Options);
-
-    /// <summary>
-    /// The SHA-256 of a state written as <paramref name="snapshot"/>, as lower-case hex: the
-    /// state's runtime type, without its assembly, then the JSON. Two states hash alike only when
-    /// they are of the same type and write the same JSON, property for property and in the same
-    /// order.
-    /// </summary>
-    public static string Hash(byte[] snapshot, Type type)
-    {
-        using var hash = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
-
-        // The type's name, then a byte no name or JSON text contains, then the JSON, so no type
-        // and JSON pair writes the same bytes as another.
-        hash.AppendData(Encoding.UTF8.GetBytes(type.ToString()));
-        hash.AppendData([0]);
-        hash.AppendData(snapshot);
-
-        return Convert.ToHexStringLower(hash.GetHashAndReset());
-    }
 
     /// <summary>A copy of the state, read back from <paramref name="snapshot"/> as <paramref name="type"/>.</summary>
     public static object Read(byte[] snapshot, Type type) =>

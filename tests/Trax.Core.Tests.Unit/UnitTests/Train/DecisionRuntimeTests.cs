@@ -812,7 +812,7 @@ public class DecisionRuntimeTests : TestSetup
     }
 
     [Test]
-    public async Task Replay_OfAStateThatCannotBeWrittenAsJson_IsAskedAfreshWithoutFailing()
+    public async Task Replay_OfAStateThatCannotBeHashed_IsAskedAfreshWithoutFailing()
     {
         Func<List<string>, Func<MonadTask<string, bool>, MonadTask<string, bool>>> chain = log =>
             t =>
@@ -824,9 +824,12 @@ public class DecisionRuntimeTests : TestSetup
             new Services(),
             new ScriptedDecider().Choose(Lane.Right)
         );
-        journal.StateHash(QuestionKey.For<Lane>()).Should().BeNull("the state has no JSON to hash");
+        journal
+            .StateHash(QuestionKey.For<Lane>())
+            .Should()
+            .BeNull("a state holding a delegate has no hash");
 
-        // Even a recorded hash, which a state that cannot be written never has, is not trusted
+        // Even a recorded hash, which a state that cannot be hashed never has, is not trusted
         // against a state that cannot be hashed to compare it with.
         journal.HoldStateHash(QuestionKey.For<Lane>(), new string('0', 64));
         var decider = new ScriptedDecider().Choose(Lane.Left);
@@ -856,7 +859,7 @@ public class DecisionRuntimeTests : TestSetup
         var made = observer.Decisions.Single();
         made.Replayed.Should().BeFalse();
         made.StateHash.Should().BeNull();
-        made.ReplayRefused.Should().Contain("cannot be written as JSON");
+        made.ReplayRefused.Should().Contain("the state cannot be hashed");
     }
 
     [Test]
@@ -877,6 +880,198 @@ public class DecisionRuntimeTests : TestSetup
             .StateHash.Should()
             .MatchRegex("^[0-9a-f]{64}$")
             .And.NotContain("refund");
+    }
+
+    [TestCaseSource(nameof(ShapesJsonWouldNotTellApart))]
+    public async Task Replay_OfAStateThatDiffersWhereJsonWouldNotSee_IsAskedAfresh(
+        Func<decimal, decimal, Task<(int Asked, DecisionMade Made)>> repeat
+    )
+    {
+        var (asked, made) = await repeat(20, 2000);
+
+        asked
+            .Should()
+            .Be(
+                1,
+                "0004-a-recorded-answer-replays-only-into-the-same-state.md: the decider can "
+                    + "read the amount, so an answer about 20 is not one about 2000"
+            );
+        made.Replayed.Should().BeFalse();
+        made.ReplayRefused.Should().Contain("was given about a different state");
+    }
+
+    [TestCaseSource(nameof(ShapesJsonWouldNotTellApart))]
+    public async Task Replay_OfTheSameValueInEachShape_IsReplayed(
+        Func<decimal, decimal, Task<(int Asked, DecisionMade Made)>> repeat
+    )
+    {
+        var (asked, made) = await repeat(20, 20);
+
+        asked
+            .Should()
+            .Be(
+                0,
+                "0004-a-recorded-answer-replays-only-into-the-same-state.md: an equal state "
+                    + "built again replays"
+            );
+        made.Replayed.Should().BeTrue();
+    }
+
+    private static IEnumerable<TestCaseData> ShapesJsonWouldNotTellApart()
+    {
+        yield return Shape(
+            "ATuple",
+            (a, b) =>
+                Repeat((new Order(a), new Customer("ann")), (new Order(b), new Customer("ann")))
+        );
+        yield return Shape(
+            "APublicField",
+            (a, b) => Repeat(new FieldOrder { Amount = a }, new FieldOrder { Amount = b })
+        );
+        yield return Shape(
+            "ADerivedTypeHeldAsItsAbstractBase",
+            (a, b) =>
+                Repeat(
+                    new Checkout { Payment = new Card { Amount = a } },
+                    new Checkout { Payment = new Card { Amount = b } }
+                )
+        );
+        yield return Shape(
+            "AJsonIgnoredProperty",
+            (a, b) => Repeat(new IgnoredOrder { Amount = a }, new IgnoredOrder { Amount = b })
+        );
+        yield return Shape(
+            "APrivateField",
+            (a, b) => Repeat(new PrivateOrder(a), new PrivateOrder(b))
+        );
+    }
+
+    private static TestCaseData Shape(
+        string name,
+        Func<decimal, decimal, Task<(int Asked, DecisionMade Made)>> repeat
+    ) => new TestCaseData(repeat).SetArgDisplayNames(name);
+
+    /// <summary>
+    /// Records a run that asks about <paramref name="first"/>, then repeats it about
+    /// <paramref name="second"/>, and says how many times the repeat asked its decider.
+    /// </summary>
+    private static async Task<(int Asked, DecisionMade Made)> Repeat<T>(T first, T second)
+    {
+        static Func<MonadTask<string, bool>, MonadTask<string, bool>> About(T state) =>
+            t => t.Chain(new Makes<T>(state)).Switch<T, Lane>(s => Lanes(s, []));
+
+        var journal = await Recorded(
+            About(first),
+            new Services(),
+            new ScriptedDecider().Choose(Lane.Right)
+        );
+        var decider = new ScriptedDecider().Choose(Lane.Left);
+        var observer = new RecordingObserver();
+
+        var result = await Run(
+            About(second),
+            new Services()
+                .With<IDecider>(decider)
+                .With<IDecisionReplay>(journal)
+                .With<IDecisionObserver>(observer)
+        );
+
+        result.IsRight.Should().BeTrue();
+        return (decider.Requests.Count, observer.Decisions.Single());
+    }
+
+    [Test]
+    public async Task Replay_OfAStateWithACycle_IsAskedAfreshWithoutFailing()
+    {
+        static Node Looped()
+        {
+            var node = new Node();
+            node.Next = node;
+            return node;
+        }
+
+        var (asked, made) = await Repeat(Looped(), Looped());
+
+        asked.Should().Be(1, "0004-a-recorded-answer-replays-only-into-the-same-state.md");
+        made.StateHash.Should().BeNull();
+        made.ReplayRefused.Should().Contain("recorded without a hash");
+    }
+
+    [Test]
+    public async Task QuestionType_IsTheTypeTheQuestionWasAskedAbout()
+    {
+        var observer = new RecordingObserver();
+
+        await Run(
+            t =>
+                t.Decide<string>(q => q.Choice<Lane>().YesNo<Flag>())
+                    .Switch<Lane>(s => Lanes(s, [])),
+            new Services()
+                .With<IDecider>(new ScriptedDecider().Choose(Lane.Left).YesNo<Flag>(0.9))
+                .With<IDecisionObserver>(observer)
+        );
+
+        observer.Decisions.Select(d => d.QuestionType).Should().Equal(typeof(Lane), typeof(Flag));
+    }
+
+    [Test]
+    public async Task QuestionType_IsOnARefusalToo()
+    {
+        var observer = new RecordingObserver();
+
+        await Run(
+            t => t.Switch<string, Lane>(s => Lanes(s, [])),
+            new Services().With<IDecider>(new ScriptedDecider()).With<IDecisionObserver>(observer)
+        );
+
+        observer.Refusals.Should().ContainSingle().Which.QuestionType.Should().Be(typeof(Lane));
+    }
+
+    public sealed record Order(decimal Amount);
+
+    public sealed record Customer(string Name);
+
+    public sealed class FieldOrder
+    {
+        public decimal Amount;
+    }
+
+    public abstract class Payment
+    {
+        public string Kind { get; set; } = "x";
+    }
+
+    public sealed class Card : Payment
+    {
+        public decimal Amount { get; set; }
+    }
+
+    public sealed class Checkout
+    {
+        public Payment Payment { get; set; } = null!;
+    }
+
+    public sealed class IgnoredOrder
+    {
+        [System.Text.Json.Serialization.JsonIgnore]
+        public decimal Amount { get; set; }
+    }
+
+    public sealed class PrivateOrder(decimal amount)
+    {
+        private readonly decimal _amount = amount;
+
+        public bool IsLarge() => _amount > 100;
+    }
+
+    public sealed class Node
+    {
+        public Node? Next { get; set; }
+    }
+
+    private sealed class Makes<T>(T value) : Junction<string, T>
+    {
+        public override Task<T> Run(string input) => Task.FromResult(value);
     }
 
     /// <summary>
