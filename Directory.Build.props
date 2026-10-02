@@ -7,7 +7,7 @@
     <WarningsAsErrors>$(WarningsAsErrors);NU1901;NU1902;NU1903;NU1904</WarningsAsErrors>
   </PropertyGroup>
 
-  <!-- Every project restores with a lockfile. Without this, `dotnet restore --locked-mode` checks a
+  <!-- Every project restores with a lockfile. Without this, a locked-mode restore checks a
        lockfile only where one happens to be committed, and a new project without one restores
        unlocked and passes CI. The Rider plugin is built by its own Gradle build and is not locked. -->
   <PropertyGroup Condition="!$(MSBuildProjectDirectory.StartsWith('$(MSBuildThisFileDirectory)plugins'))">
