@@ -878,8 +878,75 @@ public class DecisionRuntimeTests : TestSetup
         observer
             .Decisions.Single()
             .StateHash.Should()
-            .MatchRegex("^[0-9a-f]{64}$")
+            .MatchRegex("^s1:[0-9a-f]{64}$")
             .And.NotContain("refund");
+    }
+
+    [Test]
+    public async Task StateHash_UnderAKeyFromTheContainer_IsKeyedAndReplays()
+    {
+        var key = new StateHashKey([.. Enumerable.Range(0, 32).Select(i => (byte)i)]);
+        Func<MonadTask<string, bool>, MonadTask<string, bool>> chain = t =>
+            t.Switch<string, Lane>(s => Lanes(s, []));
+        var journal = await Recorded(
+            chain,
+            new Services().With(key),
+            new ScriptedDecider().Choose(Lane.Right)
+        );
+        journal
+            .StateHash(QuestionKey.For<Lane>())
+            .Should()
+            .MatchRegex(
+                "^k1:[0-9a-f]{64}$",
+                "0004-a-recorded-answer-replays-only-into-the-same-state.md: a host that supplies a key gets a keyed hash"
+            );
+
+        var decider = new ScriptedDecider().Choose(Lane.Left);
+        var observer = new RecordingObserver();
+
+        await Run(
+            chain,
+            new Services()
+                .With(key)
+                .With<IDecider>(decider)
+                .With<IDecisionReplay>(journal)
+                .With<IDecisionObserver>(observer)
+        );
+
+        decider.Requests.Should().BeEmpty("the same state under the same key replays");
+        observer.Decisions.Single().Replayed.Should().BeTrue();
+    }
+
+    [Test]
+    public async Task Replay_OfAnAnswerRecordedUnderAKey_IntoARunWithoutOne_IsAskedAfresh()
+    {
+        Func<MonadTask<string, bool>, MonadTask<string, bool>> chain = t =>
+            t.Switch<string, Lane>(s => Lanes(s, []));
+        var journal = await Recorded(
+            chain,
+            new Services().With(new StateHashKey(new byte[32])),
+            new ScriptedDecider().Choose(Lane.Right)
+        );
+        var decider = new ScriptedDecider().Choose(Lane.Left);
+        var observer = new RecordingObserver();
+
+        await Run(
+            chain,
+            new Services()
+                .With<IDecider>(decider)
+                .With<IDecisionReplay>(journal)
+                .With<IDecisionObserver>(observer)
+        );
+
+        decider
+            .Requests.Should()
+            .ContainSingle(
+                "0004-a-recorded-answer-replays-only-into-the-same-state.md: a keyed and an unkeyed hash never match"
+            );
+        observer
+            .Decisions.Single()
+            .ReplayRefused.Should()
+            .Contain("was given about a different state");
     }
 
     [TestCaseSource(nameof(ShapesJsonWouldNotTellApart))]
@@ -1137,13 +1204,16 @@ public class DecisionRuntimeTests : TestSetup
         made.Decider.Should().Be(typeof(ScriptedDecider));
         made.ReplayRefused.Should().Contain("no longer fits").And.Contain(why);
         made.ReplayRefused.Should().NotContain("the decider");
+        made.ReplayRefused.Should()
+            .NotContain("Middle", "the reason never quotes the recorded answer")
+            .And.NotContain("0.9", "the reason never quotes the recorded answer");
     }
 
     private static IEnumerable<TestCaseData> StaleReplays()
     {
         yield return new TestCaseData(
             new ChoiceAnswer("Middle"),
-            "'Middle', which is not one of its options"
+            "its recorded answer is not one of its options"
         ).SetName("Replay_AskedAfresh_AnOptionSinceRemoved");
         yield return new TestCaseData(new YesNoAnswer(0.9), "not a choice").SetName(
             "Replay_AskedAfresh_AnotherKindOfAnswer"

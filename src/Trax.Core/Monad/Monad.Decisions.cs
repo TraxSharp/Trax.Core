@@ -324,7 +324,7 @@ public partial class Monad<TInput, TReturn>
                 return;
 
             hashed = true;
-            stateHash = StateDigest.Of(state);
+            stateHash = HashKey(out var key) ? StateDigest.Of(state, key) : null;
         }
 
         try
@@ -352,24 +352,24 @@ public partial class Monad<TInput, TReturn>
                 // option since renamed or dropped, fewer levels, another kind of question) cannot
                 // repeat what that run did, so the decider is asked as if nothing had been
                 // recorded.
+                // The reason names what does not fit, never the recorded answer itself.
                 var problem =
                     earlier.Fingerprint != fingerprints[spec.Key]
-                        ? "was given to the question as an earlier version of the chain asked it, "
-                            + "and the question or the steps asking it have changed since"
+                        ? "it was given to the question as an earlier version of the chain asked "
+                            + "it, and the question or the steps asking it have changed since"
                         : spec.ReplayProblem(earlier.Answer);
 
                 if (problem is not null)
                 {
                     replayRefused[spec.Key] =
                         $"the answer recorded for '{spec.Key}' no longer fits the question as it "
-                        + $"is asked now: it {problem}";
+                        + $"is asked now: {problem}";
                     Warn($"{at}: {replayRefused[spec.Key]}. The decider is asked afresh.");
                     continue;
                 }
 
-                // An answer is about the state it was given for. A retry runs every step again,
-                // so the state asked about now may not be that one: the data changed in between,
-                // or a loop met its items in another order. Only an exact match is replayed.
+                // A recorded answer replays only into the state it was given about: the hash of
+                // the state asked about now must equal the recorded one exactly.
                 HashState();
 
                 if (StateProblem(spec.Key, earlier.StateHash, stateHash) is { } differs)
@@ -733,6 +733,32 @@ public partial class Monad<TInput, TReturn>
 
         await scope.DisposeAsync().ConfigureAwait(false);
         return null;
+    }
+
+    /// <summary>
+    /// The <see cref="StateHashKey"/> from the train's container, or null when it registers none.
+    /// False when resolving it failed, so the state goes unhashed and nothing is replayed, rather
+    /// than hashed without the key the host meant to use.
+    /// </summary>
+    private bool HashKey(out StateHashKey? key)
+    {
+        key = null;
+
+        try
+        {
+            key =
+                (
+                    Memory.GetValueOrDefault(typeof(IServiceProvider)) as IServiceProvider
+                )?.GetService(typeof(StateHashKey)) as StateHashKey;
+            return true;
+        }
+        catch (Exception e)
+        {
+            Warn(
+                $"the state hash key could not be resolved, so the state is not hashed: {e.Message}"
+            );
+            return false;
+        }
     }
 
     private static string Uncopied(string why) =>
