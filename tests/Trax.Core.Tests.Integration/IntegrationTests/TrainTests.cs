@@ -1,4 +1,4 @@
-using FluentAssertions;
+using AwesomeAssertions;
 using LanguageExt;
 using Microsoft.Extensions.Logging;
 using Trax.Core.Exceptions;

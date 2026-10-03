@@ -1,5 +1,5 @@
 using System.Runtime.CompilerServices;
-using FluentAssertions;
+using AwesomeAssertions;
 using LanguageExt;
 using Trax.Core.Exceptions;
 using Trax.Core.Extensions;

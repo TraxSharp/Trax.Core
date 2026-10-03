@@ -1,4 +1,4 @@
-using FluentAssertions;
+using AwesomeAssertions;
 using LanguageExt;
 using LanguageExt.UnsafeValueAccess;
 using Trax.Core.Decisions;

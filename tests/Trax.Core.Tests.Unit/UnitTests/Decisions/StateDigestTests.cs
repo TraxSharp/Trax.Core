@@ -3,7 +3,7 @@ using System.Collections.Immutable;
 using System.Collections.ObjectModel;
 using System.Runtime.CompilerServices;
 using System.Text.Json.Serialization;
-using FluentAssertions;
+using AwesomeAssertions;
 using Trax.Core.Decisions;
 
 namespace Trax.Core.Tests.Unit.UnitTests.Decisions;
