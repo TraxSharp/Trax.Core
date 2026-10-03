@@ -949,6 +949,30 @@ public class DecisionRuntimeTests : TestSetup
             .Contain("was given about a different state");
     }
 
+    [Test]
+    public async Task Shadow_OnATupleState_IsHandedTheTuplesItems()
+    {
+        var shadow = new ScriptedDecider().Choose(Lane.Left);
+        var observer = new RecordingObserver();
+
+        var result = await Run(
+            t =>
+                t.Chain(new Makes<(Order, Customer)>((new Order(20), new Customer("ann"))))
+                    .Decide<(Order, Customer)>(q =>
+                        q.Choice<Lane>().Shadow<IShadow>().WaitForShadows(Hang)
+                    )
+                    .Switch<Lane>(s => Lanes(s, [])),
+            Shadowed(new ScriptedDecider().Choose(Lane.Left), shadow, observer)
+        );
+
+        result.IsRight.Should().BeTrue();
+        shadow
+            .Requests.Should()
+            .ContainSingle()
+            .Which.State.Should()
+            .Be((new Order(20), new Customer("ann")), "a shadow sees what the live decider sees");
+    }
+
     [TestCaseSource(nameof(ShapesJsonWouldNotTellApart))]
     public async Task Replay_OfAStateThatDiffersWhereJsonWouldNotSee_IsAskedAfresh(
         Func<decimal, decimal, Task<(int Asked, DecisionMade Made)>> repeat
