@@ -116,7 +116,8 @@ public sealed record DecisionRefused(
 /// Why an answer recorded for this question by an earlier run was not replayed, so the decider
 /// was asked afresh, or null when there was none to refuse. It says which check refused it: an
 /// answer given to a different asking of the question, one that no longer fits the question, or
-/// one given about a different state (see <see cref="StateHash"/>).
+/// one given about a different state (see <see cref="StateHash"/>). It says what does not fit and
+/// never quotes the recorded answer.
 /// </param>
 public sealed record DecisionMade(
     string Train,
@@ -132,25 +133,31 @@ public sealed record DecisionMade(
 )
 {
     /// <summary>
-    /// The SHA-256, as lower-case hex, of the state the question was asked about, taken before the
-    /// decider was asked. It covers every instance field of the state's runtime type, public or
+    /// The hash of the state the question was asked about, taken before the decider was asked:
+    /// <c>k1:</c> and the lower-case hex of an HMAC-SHA256 under the <see cref="StateHashKey"/> the
+    /// train's container supplies, or <c>s1:</c> and the lower-case hex of a SHA-256 when it
+    /// supplies none. It covers every instance field of the state's runtime type, public or
     /// not (so auto-properties, tuple items, record members and a derived type's members held where
     /// a base type is declared all count), and every value they hold, recursively, because an
     /// in-process decider can read all of them. Null when the state cannot be read the same way
     /// every time: it holds a reference cycle, a delegate, a pointer or handle, a type or member, a
-    /// stream, task or thread, a field whose read throws, or is nested deeper than 64 or larger
-    /// than the hash allows.
+    /// stream, task or thread, a non-generic hashtable, a field whose read throws, or is nested
+    /// deeper than 64 or larger than the hash allows (1,000,000 values or 16 MiB of encoding).
+    /// Null too when the container's key cannot be resolved.
     /// </summary>
     /// <remarks>
     /// A host that replays stores it with the answer and returns it in
     /// <see cref="RecordedAnswer.StateHash"/>. An answer is replayed only into an asking whose
-    /// state hashes exactly the same, because a repeated run asks about the state as it is then,
-    /// which may not be the state the answer was given about.
+    /// state hashes exactly the same, so a recorded answer replays only into the same state. A
+    /// keyed and an unkeyed hash never match.
     ///
-    /// <para>Only the hash leaves the run, never the state. A state with few possible values (a
-    /// yes or no, a small amount) can still be recovered from its hash by trying each value, but
-    /// only by someone who can read where it is recorded, which in a host that records runs
-    /// already holds the run's input.</para>
+    /// <para>It covers the state's value only. What a decider reads from elsewhere, such as a
+    /// customer it looks up by an id the state holds, is not in it, so a change there counts only
+    /// when the state carries the value itself.</para>
+    ///
+    /// <para>Only the hash leaves the run, never the state. The hash covers values a host may mask
+    /// or withhold elsewhere, so a host that records decisions should register a
+    /// <see cref="StateHashKey"/>, the same in every process that may repeat a run.</para>
     /// </remarks>
     public string? StateHash { get; init; }
 
@@ -217,9 +224,8 @@ public sealed record TrackRouted(
 /// one that no longer fits the question (an option renamed or removed, a scale with fewer levels,
 /// a different kind of question) cannot repeat what the earlier run did. Nor is one whose
 /// <see cref="RecordedAnswer.StateHash"/> differs from the state asked about now, is null, or
-/// cannot be compared because the state cannot be hashed: a repeated run asks about the
-/// state as it is then, which may have changed since, or, in a loop, may be another item asked
-/// about at the same occurrence. None of these is acted on: the decider is asked afresh, with the
+/// cannot be compared because the state cannot be hashed: a recorded answer replays only into
+/// the same state. None of these is acted on: the decider is asked afresh, with the
 /// reason in <see cref="DecisionMade.ReplayRefused"/>. The check is made here, so every replay
 /// inherits it and an implementation only stores and returns the hash. A recorded
 /// choice of a member the step has no track for is replayed like any other, and takes the
