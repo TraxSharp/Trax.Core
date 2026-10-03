@@ -221,6 +221,10 @@ namespace Trax.Core.Decisions
         public System.Type Decider { get; init; }
         public string? Error { get; init; }
     }
+    public sealed class StateHashKey
+    {
+        public StateHashKey(byte[] key) { }
+    }
     public sealed class TrackRouted : System.IEquatable<Trax.Core.Decisions.TrackRouted>
     {
         public TrackRouted(string Train, string RunId, System.Type On, string Track, string? FallbackReason) { }
