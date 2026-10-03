@@ -162,6 +162,18 @@ public sealed record DecisionMade(
     public string? StateHash { get; init; }
 
     /// <summary>
+    /// The type of the state the question was asked about, which <see cref="StateHash"/> was
+    /// taken of: the state's runtime type, or the type the step declared it as when the state was
+    /// null. Null only on a record built outside a run.
+    /// </summary>
+    /// <remarks>
+    /// Given so a host can treat a decision by what it was about, for instance to mask or keep out
+    /// of a journal what it records about a sensitive state type, matching with inheritance
+    /// (<see cref="Type.IsAssignableTo(Type)"/>).
+    /// </remarks>
+    public Type? StateType { get; init; }
+
+    /// <summary>
     /// The type the question was asked about: the enum a choice or score is between, or the marker
     /// type a yes or no question is about. Its <see cref="Question.Key"/> is derived from it (see
     /// <see cref="QuestionKey.For(Type)"/>). Null only on a record built outside a run.

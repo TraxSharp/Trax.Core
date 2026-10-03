@@ -61,6 +61,7 @@ namespace Trax.Core.Decisions
         public string RunId { get; init; }
         public System.Collections.Generic.IReadOnlyList<Trax.Core.Decisions.ShadowAnswer> Shadows { get; init; }
         public string? StateHash { get; init; }
+        public System.Type? StateType { get; init; }
         public string Train { get; init; }
     }
     public sealed class DecisionRefused : System.IEquatable<Trax.Core.Decisions.DecisionRefused>

@@ -883,6 +883,24 @@ public class DecisionRuntimeTests : TestSetup
     }
 
     [Test]
+    public async Task StateType_IsTheRuntimeTypeOfTheStateAskedAbout()
+    {
+        var observer = new RecordingObserver();
+
+        await Run(
+            t =>
+                t.Chain(new MakeParcel(new WrappingParcel()))
+                    .Decide<IParcel>(q => q.Choice<Lane>())
+                    .Switch<Lane>(s => Lanes(s, [])),
+            new Services()
+                .With<IDecider>(new ScriptedDecider().Choose(Lane.Left))
+                .With<IDecisionObserver>(observer)
+        );
+
+        observer.Decisions.Single().StateType.Should().Be(typeof(WrappingParcel));
+    }
+
+    [Test]
     public async Task StateHash_UnderAKeyFromTheContainer_IsKeyedAndReplays()
     {
         var key = new StateHashKey([.. Enumerable.Range(0, 32).Select(i => (byte)i)]);

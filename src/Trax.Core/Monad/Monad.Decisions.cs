@@ -646,6 +646,7 @@ public partial class Monad<TInput, TReturn>
             {
                 StateHash = stateHash,
                 QuestionType = spec.On,
+                StateType = (object?)state is { } held ? held.GetType() : typeof(TState),
             };
 
             if (
